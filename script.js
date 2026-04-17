@@ -1,5 +1,5 @@
 const STORAGE_KEY = "jamly-app-v1";
-const MEMBERS = ["成员一", "成员二", "成员三", "成员四", "成员五", "成员六"];
+const MEMBERS = ["cold", "david", "圈", "星", "小安", "afai"];
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const ALL_HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 
