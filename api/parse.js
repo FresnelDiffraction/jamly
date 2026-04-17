@@ -6,7 +6,7 @@ module.exports = async function handler(req, res) {
 
   const baseUrl = (process.env.AI_BASE_URL || "").replace(/\/+$/, "");
   const apiKey = process.env.AI_API_KEY || "";
-  const model = process.env.AI_MODEL || "gpt-5.4-mini";
+  const model = "gpt-5.4";
 
   if (!baseUrl || !apiKey) {
     res.status(500).send("Missing AI_BASE_URL or AI_API_KEY");
@@ -25,39 +25,109 @@ module.exports = async function handler(req, res) {
       type: "object",
       additionalProperties: false,
       properties: {
-        summary: {
-          type: "string",
-          description: "Use one short Chinese sentence to summarize availability."
-        },
-        availableSlots: {
+        "0": {
           type: "array",
           items: {
-            type: "string",
-            pattern: "^[0-6]-(1[0-9]|2[0-2])$"
+            type: "integer",
+            minimum: 10,
+            maximum: 22
+          }
+        },
+        "1": {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 10,
+            maximum: 22
+          }
+        },
+        "2": {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 10,
+            maximum: 22
+          }
+        },
+        "3": {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 10,
+            maximum: 22
+          }
+        },
+        "4": {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 10,
+            maximum: 22
+          }
+        },
+        "5": {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 10,
+            maximum: 22
+          }
+        },
+        "6": {
+          type: "array",
+          items: {
+            type: "integer",
+            minimum: 10,
+            maximum: 22
           }
         }
       },
-      required: ["summary", "availableSlots"]
+      required: ["0", "1", "2", "3", "4", "5", "6"]
     },
     strict: true
   };
 
-  const systemPrompt = [
-    "You are a Chinese band rehearsal availability parser.",
-    "Convert the user's natural-language availability into one-hour availability slots.",
-    "Week range is Monday to Sunday.",
-    "Use Monday=0 through Sunday=6, hour 10-22 only.",
-    "The rehearsal room is open from 10:00 to 23:00, so ignore any time outside that range.",
-    "If the user says the whole week is available, return all open hours in the week.",
-    "Understand ranges such as 周一到周五, 星期一至星期五, and 周末.",
-    "If the user only mentions unavailable times, infer that all other open hours are available.",
-    "If the user says 其他时候都可以 or similar, subtract the unavailable slots from the full week.",
-    "Treat phrases like 约了朋友吃饭, 加班, 上班, 有课, 开会 as unavailable unless the user explicitly says they are available.",
-    "If wording is ambiguous, make a conservative reasonable guess.",
-    "Example: 周五晚上不可以其他时候都可以 => all open hours except Friday evening.",
-    "Example: 周五晚上约了朋友吃饭然后周一到周五的早上都不行 => full week open except Friday evening and weekday mornings.",
-    "Return only JSON matching the schema."
-  ].join(" ");
+  const systemPrompt = `
+You are a Chinese band rehearsal availability parser.
+Goal: Convert natural language into a structured availability JSON.
+
+## 1. Time Definitions
+- Opening Hours: 10:00 - 23:00 daily.
+- Standard Blocks: Morning(10-12), Noon(12-14), Afternoon(14-18), Evening(18-23).
+- Full Day/随时: 10:00-23:00.
+
+## 2. Universal Activity Generalization (NEW)
+Apply the following heuristic to handle any irregular user input:
+- CATEGORY A (Explicit Availability): Phrases like "有空", "可以", "随时", "没问题", "OK".
+- CATEGORY B (Activity Occupancy): Any mention of specific actions, hobbies, or events (e.g., 健身, 攀岩, 遛狗, 看医生, 搬家, 练琴, 甚至 "有事").
+- LOGIC: Treat ALL Category B mentions as UNAVAILABLE (Exclusion) for that period, UNLESS the user explicitly attaches a Category A suffix to it (e.g., "攀岩完有空" means available AFTER the activity).
+
+## 3. Logical Execution Protocol (Step-by-Step)
+You MUST process the input in this mental order:
+
+1. Establish Base:
+   - If the user implies broad availability (e.g., "除了...", "其他时间...", "这周都可以"), set Base = Mon-Sun 10:00-23:00.
+   - Otherwise, set Base = Only the specific times mentioned as "Available".
+
+2. Extract Exclusions (The "Occupancy" Filter):
+   - Scan for any specific activities (hobbies, chores, work, social) or negative markers ("不行", "没空").
+   - Map these to specific hours based on the time descriptors (e.g., "周六下午去攀岩" -> Sat 14:00-18:00 is UNAVAILABLE).
+
+3. Compute Intersection:
+   - Result = Base Scope - Exclusion Scope.
+   - If a user provides a range (e.g., "周一到周五"), and then mentions an exclusion ("周三要健身"), ensure Wednesday is modified while others remain full.
+
+## 4. Complex Semantic Handling
+- The "Flip" Logic: "X以前不行" = Available from X to 23:00; "X以后不行" = Available from 10:00 to X.
+- The "Except" Logic: "除了[时间/活动], 都可以" -> Base is 100%, then subtract the [时间/活动].
+- Range Logic: "周二到周日晚上六点后" refers to the evening block for EACH day in that range.
+
+## 5. Output
+Return ONLY a valid JSON object.
+- Keys must be "0" through "6" where Monday="0" and Sunday="6".
+- Values must be arrays of integer start hours between 10 and 22.
+- Do not return prose, markdown, or extra keys.
+`.trim();
 
   try {
     const response = await fetch(`${baseUrl}/responses`, {
@@ -96,10 +166,10 @@ module.exports = async function handler(req, res) {
     const data = await response.json();
     const content = extractResponseText(data);
     const parsed = JSON.parse(content);
-    const availableSlots = sanitizeSlots(parsed.availableSlots || []);
+    const availableSlots = dayMapToSlots(parsed);
 
     res.status(200).json({
-      summary: parsed.summary,
+      summary: buildSummaryFromSlots(availableSlots),
       availableSlots
     });
   } catch (error) {
@@ -137,4 +207,65 @@ function sanitizeSlots(slots) {
     const [dayB, hourB] = b.split("-").map(Number);
     return (dayA - dayB) || (hourA - hourB);
   });
+}
+
+function dayMapToSlots(dayMap) {
+  const slots = [];
+
+  for (let day = 0; day <= 6; day += 1) {
+    const hours = Array.isArray(dayMap?.[String(day)]) ? dayMap[String(day)] : [];
+    hours.forEach((hour) => {
+      if (Number.isInteger(hour) && hour >= 10 && hour <= 22) {
+        slots.push(`${day}-${hour}`);
+      }
+    });
+  }
+
+  return sanitizeSlots(slots);
+}
+
+function buildSummaryFromSlots(slots) {
+  if (!slots.length) {
+    return "暂时没有识别到明确可用时间。";
+  }
+
+  const dayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+  const grouped = new Map();
+
+  slots.forEach((slot) => {
+    const [day, hour] = slot.split("-").map(Number);
+    if (!grouped.has(day)) {
+      grouped.set(day, []);
+    }
+    grouped.get(day).push(hour);
+  });
+
+  return Array.from(grouped.entries()).map(([day, hours]) => {
+    const sorted = Array.from(new Set(hours)).sort((a, b) => a - b);
+    const ranges = [];
+    let start = sorted[0];
+    let end = sorted[0];
+
+    for (let index = 1; index < sorted.length; index += 1) {
+      const hour = sorted[index];
+      if (hour === end + 1) {
+        end = hour;
+      } else {
+        ranges.push(formatRange(start, end));
+        start = hour;
+        end = hour;
+      }
+    }
+
+    ranges.push(formatRange(start, end));
+    return `${dayNames[day]} ${ranges.join(",")}`;
+  }).join("；");
+}
+
+function formatRange(start, end) {
+  return `${padHour(start)}~${padHour(end + 1)}`;
+}
+
+function padHour(hour) {
+  return `${String(hour).padStart(2, "0")}:00`;
 }
