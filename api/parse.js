@@ -25,118 +25,137 @@ module.exports = async function handler(req, res) {
       type: "object",
       additionalProperties: false,
       properties: {
-        "0": {
-          type: "array",
-          items: {
-            type: "integer",
-            minimum: 10,
-            maximum: 22
-          }
+        normalized_text: {
+          type: "string"
         },
-        "1": {
-          type: "array",
-          items: {
-            type: "integer",
-            minimum: 10,
-            maximum: 22
-          }
+        base_mode: {
+          type: "string",
+          enum: ["full_week", "mentioned_only"]
         },
-        "2": {
-          type: "array",
-          items: {
-            type: "integer",
-            minimum: 10,
-            maximum: 22
-          }
-        },
-        "3": {
-          type: "array",
-          items: {
-            type: "integer",
-            minimum: 10,
-            maximum: 22
-          }
-        },
-        "4": {
-          type: "array",
-          items: {
-            type: "integer",
-            minimum: 10,
-            maximum: 22
-          }
-        },
-        "5": {
-          type: "array",
-          items: {
-            type: "integer",
-            minimum: 10,
-            maximum: 22
-          }
-        },
-        "6": {
-          type: "array",
-          items: {
-            type: "integer",
-            minimum: 10,
-            maximum: 22
-          }
+        availability: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            "0": {
+              type: "array",
+              items: {
+                type: "integer",
+                minimum: 10,
+                maximum: 22
+              }
+            },
+            "1": {
+              type: "array",
+              items: {
+                type: "integer",
+                minimum: 10,
+                maximum: 22
+              }
+            },
+            "2": {
+              type: "array",
+              items: {
+                type: "integer",
+                minimum: 10,
+                maximum: 22
+              }
+            },
+            "3": {
+              type: "array",
+              items: {
+                type: "integer",
+                minimum: 10,
+                maximum: 22
+              }
+            },
+            "4": {
+              type: "array",
+              items: {
+                type: "integer",
+                minimum: 10,
+                maximum: 22
+              }
+            },
+            "5": {
+              type: "array",
+              items: {
+                type: "integer",
+                minimum: 10,
+                maximum: 22
+              }
+            },
+            "6": {
+              type: "array",
+              items: {
+                type: "integer",
+                minimum: 10,
+                maximum: 22
+              }
+            }
+          },
+          required: ["0", "1", "2", "3", "4", "5", "6"]
         }
       },
-      required: ["0", "1", "2", "3", "4", "5", "6"]
+      required: ["normalized_text", "base_mode", "availability"]
     },
     strict: true
   };
 
   const systemPrompt = `
-You are a Chinese band rehearsal availability parser.
-Goal: Convert natural language into a structured availability JSON.
+你是一个中文乐队排练时间解析器。
+你的任务不是随便猜，而是先理解句意，再输出最终可用时间。
 
-## 1. Time Definitions
-- Opening Hours: 10:00 - 23:00 daily.
-- Standard Blocks: Morning(10-12), Noon(12-14), Afternoon(14-18), Evening(18-23).
-- Full Day/随时: 10:00-23:00.
+## 目标
+把用户一句非常口语、非常随意、甚至可能带语音转写错误的话，解析成：
+1. normalized_text：你理解后的标准中文表达
+2. base_mode：
+   - "full_week"：用户表达的是“默认整周都可以，只排除少数不行时间”
+   - "mentioned_only"：用户只明确说了某些可用时间，没有表达“其他时间也可以”
+3. availability：最终可用小时块，Monday="0" 到 Sunday="6"
 
-## 2. Universal Activity Generalization (NEW)
-Apply the following heuristic to handle any irregular user input:
-- CATEGORY A (Explicit Availability): Phrases like "有空", "可以", "随时", "没问题", "OK".
-- CATEGORY B (Activity Occupancy): Any mention of specific actions, hobbies, or events (e.g., 健身, 攀岩, 遛狗, 看医生, 搬家, 练琴, 甚至 "有事").
-- LOGIC: Treat ALL Category B mentions as UNAVAILABLE (Exclusion) for that period, UNLESS the user explicitly attaches a Category A suffix to it (e.g., "攀岩完有空" means available AFTER the activity).
+## 硬规则
+- 排练房开放时间只有每天 10:00-23:00，所以只允许输出 10-22 这些起始小时。
+- “一个具体的不行时间段”只能排除那一段，绝不能因此排除一整天。
+- 如果用户说“其他时间都可以 / 其他时候都可以 / 其余时间OK / 除了X都可以”，base_mode 必须是 "full_week"。
+- 如果用户提到活动、约会、上课、加班、吃饭、有事、开会、看医生、健身、攀岩等，默认它代表那个时间段“不可以”。
+- 如果一句话同时有“整体都可以”和“局部不行”，你必须先建立整周可用，再减去这些局部不行。
 
-## 3. Logical Execution Protocol (Step-by-Step)
-You MUST process the input in this mental order:
+## 中文时间语义
+- “下午2点到5点” = 14,15,16 不可用
+- “晚上7点到10点” = 19,20,21 不可用
+- “早上10点到12点” = 10,11 不可用
+- “中午12点到2点” = 12,13
+- “晚上8点后” = 20,21,22
+- “周五晚上” 默认指 18,19,20,21,22
+- “周末” = 周六和周日
+- “周一到周五” = 每一天分别处理，不能混成一个整体时间块
 
-1. Establish Base:
-   - If the user implies broad availability (e.g., "除了...", "其他时间...", "这周都可以"), set Base = Mon-Sun 10:00-23:00.
-   - Otherwise, set Base = Only the specific times mentioned as "Available".
+## 处理顺序
+1. 先把口语恢复成正常句意，写入 normalized_text。
+2. 判断 base_mode。
+3. 把每个子句拆开，分别识别日期、时间范围、可用/不可用。
+4. 先建立 base，再逐条加减时间块。
+5. 最后做一次自检：
+   - 有没有把局部不行误扩成整天不行？
+   - 有没有把“不行”误当成“可以”？
+   - 有没有把“周X到周Y”错误混到别的天？
 
-2. Extract Exclusions (The "Occupancy" Filter):
-   - Scan for any specific activities (hobbies, chores, work, social) or negative markers ("不行", "没空").
-   - Map these to specific hours based on the time descriptors (e.g., "周六下午去攀岩" -> Sat 14:00-18:00 is UNAVAILABLE).
-   - If the user gives an exact clock range such as "两点到四点有课", "下午2点到4点开会", exclude ONLY that range, not the whole morning/afternoon/day.
-   - If the user says an activity happens at one specific period inside a day, keep the rest of that day available when the base scope already includes that day.
+## 关键例子
+- “周一下午2点到5点有课，其他时间都可以”
+  => full_week；只排除周一 14,15,16
+- “周二晚上7点到10点有课，其他时间都可以”
+  => full_week；只排除周二 19,20,21
+- “周五晚上约了朋友吃饭，其他时间都可以”
+  => full_week；只排除周五 18,19,20,21,22
+- “周六下午2点到4点不行，其他时间都可以”
+  => full_week；只排除周六 14,15
+- “周一下午2点到4点有课周二晚上7点到10点有课周三早上10点到12点有课然后其他时间都是可以的”
+  => full_week；三段局部排除分别作用在三天上
 
-3. Compute Intersection:
-   - Result = Base Scope - Exclusion Scope.
-   - If a user provides a range (e.g., "周一到周五"), and then mentions an exclusion ("周三要健身"), ensure Wednesday is modified while others remain full.
-   - Never remove an entire day unless the user clearly says the whole day is unavailable.
-
-## 4. Complex Semantic Handling
-- The "Flip" Logic: "X以前不行" = Available from X to 23:00; "X以后不行" = Available from 10:00 to X.
-- The "Except" Logic: "除了[时间/活动], 都可以" -> Base is 100%, then subtract the [时间/活动].
-- Range Logic: "周二到周日晚上六点后" refers to the evening block for EACH day in that range.
-- Clock Logic: "周一两点到四点有课" means Monday 14:00-16:00 unavailable; if the sentence also implies broad availability, Monday hours outside 14:00-16:00 remain available.
-- Chinese colloquial time logic: "下午两点到四点" = 14-16, "晚上八点后" = 20-23, "中午十二点到两点" = 12-14.
-
-## 5. Examples
-- "我这周都可以，周一两点到四点有课" -> Base is full week; exclude only Monday 14:00 and 15:00.
-- "我周五约了朋友吃饭就不晚上不行然后周一一两点到四点有课也不行" -> Base is full week; exclude Friday evening and Monday 14:00-16:00 only.
-- "周二到周日晚上六点后都可以，周一晚上八点后可以，周四周五的下午不行" -> Tue-Sun include 18-23, Monday include 20-23, then remove Thu/Fri 14-18 if present in base.
-
-## 6. Output
-Return ONLY a valid JSON object.
-- Keys must be "0" through "6" where Monday="0" and Sunday="6".
-- Values must be arrays of integer start hours between 10 and 22.
-- Do not return prose, markdown, or extra keys.
+## 输出要求
+- 只返回 JSON，不要解释，不要 markdown。
+- availability 必须是最终可用时间，不是不可用时间。
+- 如果句子有少量口误或语音转写错误，按最合理的日常表达理解，但不要发散猜测。
 `.trim();
 
   try {
@@ -176,9 +195,11 @@ Return ONLY a valid JSON object.
     const data = await response.json();
     const content = extractResponseText(data);
     const parsed = JSON.parse(content);
-    const availableSlots = dayMapToSlots(parsed);
+    const availableSlots = dayMapToSlots(parsed.availability);
 
     res.status(200).json({
+      normalizedText: parsed.normalized_text,
+      baseMode: parsed.base_mode,
       summary: buildSummaryFromSlots(availableSlots),
       availableSlots
     });

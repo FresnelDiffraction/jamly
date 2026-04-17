@@ -393,7 +393,6 @@ function formatSlotsByDay(slots) {
 }
 
 async function parseAvailabilitySmart(rawText) {
-  const localParsed = parseAvailability(rawText);
   try {
     const response = await fetch("/api/parse", {
       method: "POST",
@@ -404,17 +403,16 @@ async function parseAvailabilitySmart(rawText) {
     if (response.ok) {
       const data = await response.json();
       const availableSlots = sanitizeSlots(data.availableSlots || []);
-      const remoteParsed = {
+      return {
         availableSlots,
         summary: buildAvailabilitySummary(availableSlots) || data.summary || "暂时没有识别到明确可用时间。"
       };
-      return chooseParsedResult(rawText, localParsed, remoteParsed);
     }
   } catch (error) {
     console.warn("Remote parse failed, fallback to local parser:", error);
   }
 
-  return localParsed;
+  return parseAvailability(rawText);
 }
 
 function parseAvailability(rawText) {
