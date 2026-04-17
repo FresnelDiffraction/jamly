@@ -1,0 +1,8 @@
+<svg width="160" height="160" viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="160" height="160" rx="36" fill="#1F2B23"/>
+  <circle cx="80" cy="80" r="54" fill="#FFF8EE"/>
+  <path d="M58 48C58 44.6863 60.6863 42 64 42H70V92C70 100.837 62.8366 108 54 108H50V96H54C56.2091 96 58 94.2091 58 92V48Z" fill="#1F7A5B"/>
+  <path d="M90 42H102C105.314 42 108 44.6863 108 48V112C108 115.314 105.314 118 102 118H96V68C96 59.1634 88.8366 52 80 52H74V42H80C83.8133 42 87.4762 42.7844 90.8 44.2L90 42Z" fill="#D4864F"/>
+  <path d="M78 77C78 69.8203 83.8203 64 91 64H110V76H91C90.4022 76 89.8857 76.5166 89.8857 77.1143C89.8857 77.6233 90.2385 78.0649 90.7363 78.1787L112 83.04V95.36L87.9521 89.9688C82.2417 88.6889 78 83.6208 78 77Z" fill="#1F2B23"/>
+  <text x="80" y="142" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" fill="#FFF8EE" letter-spacing="2">JAMLY</text>
+</svg>

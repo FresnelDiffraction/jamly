@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Jamly</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="hero-panel">
+      <div class="brand-lockup">
+        <img src="./logo.svg" alt="Jamly logo" class="brand-logo">
+        <div>
+          <p class="eyebrow">Band Assistant</p>
+          <h1>Jamly</h1>
+        </div>
+      </div>
+
+      <p class="hero-copy">
+        像在微信群里聊天一样报时间。直接发文字，或者按住说话，系统会帮你理解这周什么时候有空，再自动汇总全员交集。
+      </p>
+
+      <div class="rule-card">
+        <h2>本周规则</h2>
+        <ul>
+          <li>统计范围：周一到周日</li>
+          <li>截止时间：周日 18:00</li>
+          <li>成员方式：统一链接，自行选择成员一到成员六</li>
+          <li>时间粒度：按 1 小时拆分汇总</li>
+        </ul>
+      </div>
+
+      <div class="hint-card">
+        <h2>可以这样说</h2>
+        <div class="chips">
+          <button class="chip" type="button" data-example="我这周都可以">我这周都可以</button>
+          <button class="chip" type="button" data-example="周三晚上和周五晚上有空">周三晚上和周五晚上有空</button>
+          <button class="chip" type="button" data-example="周六全天都行，周日中午不行">周六全天都行，周日中午不行</button>
+          <button class="chip" type="button" data-example="工作日白天不行，其他时间基本都可以">工作日白天不行</button>
+        </div>
+      </div>
+
+      <div class="hint-card">
+        <h2>事项清单</h2>
+        <form class="todo-form" id="todo-form">
+          <label class="field-label" for="todo-time">时间</label>
+          <input id="todo-time" type="datetime-local">
+          <label class="field-label" for="todo-text">事项</label>
+          <input id="todo-text" type="text" placeholder="例如：校庆演出彩排 / 周六排练 / 设备搬运">
+          <button class="ghost-button" type="submit">新增事项</button>
+          <p class="support-text" id="todo-status"></p>
+        </form>
+        <div class="todo-list" id="todo-list"></div>
+      </div>
+    </aside>
+
+    <main class="main-panel">
+      <section class="chat-panel">
+        <header class="chat-header">
+          <div>
+            <p class="eyebrow">统一提交入口</p>
+            <h2>本周排练时间收集</h2>
+          </div>
+          <div class="member-select-wrap">
+            <label for="member-select">我是</label>
+            <select id="member-select">
+              <option value="成员一">成员一</option>
+              <option value="成员二">成员二</option>
+              <option value="成员三">成员三</option>
+              <option value="成员四">成员四</option>
+              <option value="成员五">成员五</option>
+              <option value="成员六">成员六</option>
+            </select>
+          </div>
+        </header>
+
+        <div class="deadline-strip">
+          <strong>当前轮次：</strong> 周一 00:00 到周日 18:00。你可以自由表达，系统会尽量把语音和文字都整理成精确时间段。
+        </div>
+
+        <div class="chat-messages" id="chat-messages" aria-live="polite"></div>
+
+        <form class="composer" id="composer-form">
+          <label class="composer-label" for="message-input">直接输入本周有空时间</label>
+          <textarea
+            id="message-input"
+            rows="3"
+            placeholder="例如：我周三晚上可以，周五八点后也行；或者：这周除了周二晚上，其他都 ok"
+          ></textarea>
+          <div class="composer-actions">
+            <button type="button" class="ghost-button hold-button" id="voice-button">按住说话，松开发送</button>
+            <button type="submit" class="primary-button">提交这次表达</button>
+          </div>
+          <p class="support-text" id="voice-support"></p>
+        </form>
+      </section>
+
+      <section class="summary-panel">
+        <div class="summary-card">
+          <div class="summary-header">
+            <div>
+              <p class="eyebrow">当前汇总</p>
+              <h2>全员时间交集</h2>
+            </div>
+            <button type="button" class="ghost-button" id="reset-button">清空本地测试数据</button>
+          </div>
+          <div class="summary-content" id="summary-content"></div>
+        </div>
+
+        <div class="summary-card">
+          <div class="summary-header">
+            <div>
+              <p class="eyebrow">成员状态</p>
+              <h2>提交概览</h2>
+            </div>
+          </div>
+          <div id="status-content" class="status-grid"></div>
+        </div>
+
+        <div class="summary-card">
+          <div class="summary-header">
+            <div>
+              <p class="eyebrow">页面说明</p>
+              <h2>当前版本</h2>
+            </div>
+          </div>
+          <ul class="notes-list">
+            <li>时间提交、事项清单都先保存在当前浏览器本地，方便你先测试体验。</li>
+            <li>语音会先上传到服务端转写，再交给 AI 做时间理解，不再依赖浏览器自带语音识别。</li>
+            <li>网页已经做了手机端适配，适合直接在微信里打开。</li>
+          </ul>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="./script.js"></script>
+</body>
+</html>
