@@ -64,6 +64,7 @@ const composerForm = document.getElementById("composer-form");
 const voiceButton = document.getElementById("voice-button");
 const voiceSupport = document.getElementById("voice-support");
 const resetButton = document.getElementById("reset-button");
+const clearMemberButton = document.getElementById("clear-member-button");
 const todoForm = document.getElementById("todo-form");
 const todoTimeInput = document.getElementById("todo-time");
 const todoTextInput = document.getElementById("todo-text");
@@ -85,6 +86,7 @@ async function bootstrap() {
 
   composerForm.addEventListener("submit", handleSubmit);
   resetButton.addEventListener("click", resetState);
+  clearMemberButton.addEventListener("click", clearCurrentMemberState);
   todoForm.addEventListener("submit", handleTodoSubmit);
 
   document.querySelectorAll("[data-example]").forEach((button) => {
@@ -221,6 +223,33 @@ async function resetState() {
   } catch (error) {
     console.warn("Remote reset failed:", error);
     setSupportText("当前设备已清空，但共享空间暂时没有同步成功。");
+  }
+}
+
+async function clearCurrentMemberState() {
+  const member = memberSelect.value;
+  if (!member) {
+    return;
+  }
+
+  if (speechRecognition && isRecording) {
+    speechRecognition.stop();
+  }
+
+  delete state.submissions[member];
+  state.messages = state.messages.filter((message) => message.member !== member);
+  state.updatedAt = Date.now();
+  saveLocalState(state);
+  renderAll();
+  setSupportText(`${member} 的数据已从当前设备清空。`);
+
+  try {
+    const remoteState = await mutateRemoteState({ action: "clearMember", member });
+    mergeIncomingState(remoteState);
+    setSupportText(`${member} 的数据已经从共享空间清空，不会影响其他人。`);
+  } catch (error) {
+    console.warn("Remote member clear failed:", error);
+    setSupportText(`${member} 的本地数据已清空，但共享同步暂时失败。`);
   }
 }
 

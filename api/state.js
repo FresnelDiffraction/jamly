@@ -54,6 +54,21 @@ module.exports = async function handler(req, res) {
         ...current,
         todos: [...current.todos, body.todo]
       });
+    } else if (action === "clearMember") {
+      const member = String(body.member || "").trim();
+      if (!member) {
+        res.status(400).send("Missing member");
+        return;
+      }
+
+      const submissions = { ...current.submissions };
+      delete submissions[member];
+
+      next = normalizeState({
+        ...current,
+        submissions,
+        messages: current.messages.filter((message) => message?.member !== member)
+      });
     } else if (action === "reset") {
       next = createEmptyState();
     } else if (action === "replaceState") {
