@@ -234,7 +234,7 @@ function renderAll() {
 function renderChat() {
   const intro = `
     <div class="message bot">
-      你好，我是 Jamly。你像在微信群里一样直接说这周什么时候有空就行，我会帮你整理成统一的时间段。
+      你好，我是 Jamly。你像在微信群里一样直接说这周什么时候有空就行，例如：我周五晚上约了朋友吃饭，周一下午2点到4点有课，其他时候都可以。我会帮你整理成统一的时间段。
       <small>系统消息</small>
     </div>
   `;

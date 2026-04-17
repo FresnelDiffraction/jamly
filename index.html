@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="app-shell">
-    <aside class="hero-panel">
+    <header class="topbar">
       <div class="brand-lockup">
         <img src="./logo.svg" alt="Jamly logo" class="brand-logo">
         <div>
@@ -16,45 +16,34 @@
           <h1>Jamly</h1>
         </div>
       </div>
-
-      <p class="hero-copy">
-        像在微信群里聊天一样报时间。直接发文字，或者点按钮开始说话，系统会先识别文字，再帮你整理这周什么时候有空，最后自动汇总全员交集。
-      </p>
-
-      <div class="rule-card">
-        <h2>本周规则</h2>
-        <ul>
-          <li>统计范围：周一到周日</li>
-          <li>截止时间：周日 18:00</li>
-          <li>成员方式：统一链接，自行选择成员身份</li>
-          <li>时间粒度：按 1 小时拆分汇总</li>
-          <li>排练房开放：每天 10:00 到 23:00</li>
-        </ul>
+      <div class="member-select-wrap">
+        <label for="member-select">我是</label>
+        <select id="member-select">
+          <option value="cold">cold</option>
+          <option value="david">david</option>
+          <option value="圈">圈</option>
+          <option value="星">星</option>
+          <option value="小安">小安</option>
+          <option value="afai">afai</option>
+        </select>
       </div>
+    </header>
 
-      <div class="hint-card">
-        <h2>可以这样说</h2>
-        <div class="chips">
-          <button class="chip" type="button" data-example="我这周都可以">我这周都可以</button>
-          <button class="chip" type="button" data-example="周三晚上和周五晚上有空">周三晚上和周五晚上有空</button>
-          <button class="chip" type="button" data-example="周六全天都行，周日中午不行">周六全天都行，周日中午不行</button>
-          <button class="chip" type="button" data-example="工作日白天不行，其他时间基本都可以">工作日白天不行</button>
+    <section class="todo-banner">
+      <div class="todo-banner-header">
+        <div>
+          <p class="eyebrow">Band Schedule</p>
+          <h2>事项清单</h2>
         </div>
       </div>
-
-      <div class="hint-card">
-        <h2>事项清单</h2>
-        <form class="todo-form" id="todo-form">
-          <label class="field-label" for="todo-time">时间</label>
-          <input id="todo-time" type="datetime-local">
-          <label class="field-label" for="todo-text">事项</label>
-          <input id="todo-text" type="text" placeholder="例如：校庆演出彩排 / 周六排练 / 设备搬运">
-          <button class="ghost-button" type="submit">新增事项</button>
-          <p class="support-text" id="todo-status"></p>
-        </form>
-        <div class="todo-list" id="todo-list"></div>
-      </div>
-    </aside>
+      <form class="todo-form todo-form-inline" id="todo-form">
+        <input id="todo-time" type="datetime-local" aria-label="事项时间">
+        <input id="todo-text" type="text" placeholder="添加演出、排练、彩排或其他事项" aria-label="事项内容">
+        <button class="primary-button" type="submit">新增事项</button>
+      </form>
+      <p class="support-text" id="todo-status"></p>
+      <div class="todo-list todo-list-inline" id="todo-list"></div>
+    </section>
 
     <main class="main-panel">
       <section class="chat-panel">
@@ -63,21 +52,11 @@
             <p class="eyebrow">统一提交入口</p>
             <h2>本周排练时间收集</h2>
           </div>
-          <div class="member-select-wrap">
-            <label for="member-select">我是</label>
-            <select id="member-select">
-              <option value="cold">cold</option>
-              <option value="david">david</option>
-              <option value="圈">圈</option>
-              <option value="星">星</option>
-              <option value="小安">小安</option>
-              <option value="afai">afai</option>
-            </select>
-          </div>
+          <button type="button" class="ghost-button" id="reset-button">清空当前轮次数据</button>
         </header>
 
         <div class="deadline-strip">
-          <strong>当前轮次：</strong> 周一 00:00 到周日 18:00。你可以自由表达，系统会尽量把语音和文字都整理成精确时间段。
+          <strong>当前轮次：</strong> 周一 00:00 到周日 18:00，排练房开放时间为每天 10:00 到 23:00。
         </div>
 
         <div class="chat-messages" id="chat-messages" aria-live="polite"></div>
@@ -87,11 +66,11 @@
           <textarea
             id="message-input"
             rows="3"
-            placeholder="例如：我周三晚上可以，周五八点后也行；或者：这周除了周二晚上，其他都 ok"
+            placeholder="例如：我周五晚上约了朋友吃饭，周一下午2点到4点有课，其他时候都可以"
           ></textarea>
           <div class="composer-actions">
             <button type="button" class="ghost-button hold-button" id="voice-button">点击开始说话</button>
-            <button type="submit" class="primary-button">提交这次表达</button>
+            <button type="submit" class="primary-button">提交</button>
           </div>
           <p class="support-text" id="voice-support"></p>
         </form>
@@ -104,7 +83,6 @@
               <p class="eyebrow">当前汇总</p>
               <h2>全员时间交集</h2>
             </div>
-            <button type="button" class="ghost-button" id="reset-button">清空当前轮次数据</button>
           </div>
           <div class="summary-content" id="summary-content"></div>
         </div>
@@ -117,20 +95,6 @@
             </div>
           </div>
           <div id="status-content" class="status-grid"></div>
-        </div>
-
-        <div class="summary-card">
-          <div class="summary-header">
-            <div>
-              <p class="eyebrow">页面说明</p>
-              <h2>当前版本</h2>
-            </div>
-          </div>
-          <ul class="notes-list">
-            <li>成员提交和事项清单会优先同步到共享空间，手机和电脑默认看同一份数据。</li>
-            <li>交集时间只保留排练房开放时段，也就是每天 10:00 到 23:00。</li>
-            <li>交集和成员总结都会按“周几 + 连续时间段”来展示，方便直接看结果。</li>
-          </ul>
         </div>
       </section>
     </main>
