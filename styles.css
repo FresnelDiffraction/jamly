@@ -27,7 +27,7 @@ body {
     linear-gradient(180deg, rgba(4, 9, 10, 0.56) 0%, rgba(4, 9, 10, 0.78) 100%),
     radial-gradient(circle at top left, rgba(61, 159, 139, 0.18), transparent 28%),
     radial-gradient(circle at bottom right, rgba(64, 112, 162, 0.24), transparent 34%),
-    url("./img/合照.jpg") center / cover fixed no-repeat;
+    url("./img/band-photo.jpg") center / cover fixed no-repeat;
   -webkit-text-size-adjust: 100%;
 }
 
