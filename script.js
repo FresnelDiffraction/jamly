@@ -522,13 +522,13 @@ function extractHours(part) {
   }
 
   for (const match of part.matchAll(/(\d{1,2})点(?:以后|之后|后)/g)) {
-    const start = normalizeHour(Number(match[1]));
+    const start = normalizeHourInClause(part, Number(match[1]));
     OPEN_HOURS.filter((hour) => hour >= start).forEach((hour) => hours.add(hour));
   }
 
   for (const match of part.matchAll(/(\d{1,2})点\s*(?:到|至|\-|~|～)\s*(\d{1,2})点/g)) {
-    const start = normalizeHour(Number(match[1]));
-    const end = normalizeHour(Number(match[2]));
+    const start = normalizeHourInClause(part, Number(match[1]));
+    const end = normalizeHourInClause(part, Number(match[2]), { startHour: start });
     for (let hour = start; hour < end; hour += 1) {
       if (hour >= 10 && hour <= 22) {
         hours.add(hour);
@@ -536,7 +536,9 @@ function extractHours(part) {
     }
   }
 
-  const exactMatches = Array.from(part.matchAll(/(\d{1,2})点/g), (match) => normalizeHour(Number(match[1])));
+  const exactMatches = Array.from(part.matchAll(/(\d{1,2})点/g), (match) =>
+    normalizeHourInClause(part, Number(match[1]))
+  );
   if (exactMatches.length === 1 && hours.size === 0) {
     const exact = exactMatches[0];
     if (exact >= 10 && exact <= 22) {
@@ -605,6 +607,38 @@ function normalizeHour(hour) {
     return hour + 12;
   }
   return hour;
+}
+
+function normalizeHourInClause(part, hour, options = {}) {
+  let normalized = Number(hour);
+  if (!Number.isInteger(normalized)) {
+    return normalized;
+  }
+
+  const hasMorning = /(早上|上午|早晨|清晨)/.test(part);
+  const hasNoon = /(中午)/.test(part);
+  const hasAfternoon = /(下午|午后|傍晚)/.test(part);
+  const hasEvening = /(晚上|晚间|夜里|夜间)/.test(part);
+
+  if (hasEvening || hasAfternoon) {
+    if (normalized >= 1 && normalized <= 11) {
+      normalized += 12;
+    }
+  } else if (hasNoon) {
+    if (normalized >= 1 && normalized <= 2) {
+      normalized += 12;
+    }
+  } else if (!hasMorning) {
+    normalized = normalizeHour(normalized);
+  }
+
+  if (Number.isInteger(options.startHour) && normalized <= options.startHour) {
+    if ((hasEvening || hasAfternoon || hasNoon) && normalized <= 11) {
+      normalized += 12;
+    }
+  }
+
+  return normalized;
 }
 
 function hasFullWeekAvailability(text) {
