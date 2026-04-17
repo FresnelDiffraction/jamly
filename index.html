@@ -18,7 +18,7 @@
       </div>
 
       <p class="hero-copy">
-        像在微信群里聊天一样报时间。直接发文字，或者点击按钮开始说话，系统会先识别文字，再帮你理解这周什么时候有空，最后自动汇总全员交集。
+        像在微信群里聊天一样报时间。直接发文字，或者点按钮开始说话，系统会先识别文字，再帮你整理这周什么时候有空，最后自动汇总全员交集。
       </p>
 
       <div class="rule-card">
@@ -26,8 +26,9 @@
         <ul>
           <li>统计范围：周一到周日</li>
           <li>截止时间：周日 18:00</li>
-          <li>成员方式：统一链接，自行选择成员一到成员六</li>
+          <li>成员方式：统一链接，自行选择成员身份</li>
           <li>时间粒度：按 1 小时拆分汇总</li>
+          <li>排练房开放：每天 10:00 到 23:00</li>
         </ul>
       </div>
 
@@ -103,7 +104,7 @@
               <p class="eyebrow">当前汇总</p>
               <h2>全员时间交集</h2>
             </div>
-            <button type="button" class="ghost-button" id="reset-button">清空本地测试数据</button>
+            <button type="button" class="ghost-button" id="reset-button">清空当前轮次数据</button>
           </div>
           <div class="summary-content" id="summary-content"></div>
         </div>
@@ -126,9 +127,9 @@
             </div>
           </div>
           <ul class="notes-list">
-            <li>时间提交、事项清单都先保存在当前浏览器本地，方便你先测试体验。</li>
-            <li>语音现在改为浏览器原生识别，识别后的文字仍然会交给 AI 做时间理解。</li>
-            <li>网页已经做了手机端适配，适合直接在微信里打开。</li>
+            <li>成员提交和事项清单会优先同步到共享空间，手机和电脑默认看同一份数据。</li>
+            <li>交集时间只保留排练房开放时段，也就是每天 10:00 到 23:00。</li>
+            <li>交集和成员总结都会按“周几 + 连续时间段”来展示，方便直接看结果。</li>
           </ul>
         </div>
       </section>

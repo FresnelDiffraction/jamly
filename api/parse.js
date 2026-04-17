@@ -33,7 +33,7 @@ module.exports = async function handler(req, res) {
           type: "array",
           items: {
             type: "string",
-            pattern: "^[0-6]-([0-9]|1[0-9]|2[0-3])$"
+            pattern: "^[0-6]-(1[0-9]|2[0-2])$"
           }
         }
       },
@@ -46,8 +46,9 @@ module.exports = async function handler(req, res) {
     "You are a Chinese band rehearsal availability parser.",
     "Convert the user's natural-language availability into one-hour availability slots.",
     "Week range is Monday to Sunday.",
-    "Use Monday=0 through Sunday=6, hour 0-23.",
-    "If the user says the whole week is available, return all hours in the week.",
+    "Use Monday=0 through Sunday=6, hour 10-22 only.",
+    "The rehearsal room is open from 10:00 to 23:00, so ignore any time outside that range.",
+    "If the user says the whole week is available, return all open hours in the week.",
     "If wording is ambiguous, make a conservative reasonable guess.",
     "Return only JSON matching the schema."
   ].join(" ");
@@ -89,10 +90,11 @@ module.exports = async function handler(req, res) {
     const data = await response.json();
     const content = extractResponseText(data);
     const parsed = JSON.parse(content);
+    const availableSlots = sanitizeSlots(parsed.availableSlots || []);
 
     res.status(200).json({
       summary: parsed.summary,
-      availableSlots: Array.from(new Set(parsed.availableSlots || [])).sort()
+      availableSlots
     });
   } catch (error) {
     res.status(500).send(error.message || "AI parse failed");
@@ -118,4 +120,15 @@ function extractResponseText(data) {
   }
 
   return chunks.join("\n").trim();
+}
+
+function sanitizeSlots(slots) {
+  return Array.from(new Set((slots || []).filter((slot) => {
+    const [day, hour] = String(slot).split("-").map(Number);
+    return Number.isInteger(day) && Number.isInteger(hour) && day >= 0 && day <= 6 && hour >= 10 && hour <= 22;
+  }))).sort((a, b) => {
+    const [dayA, hourA] = a.split("-").map(Number);
+    const [dayB, hourB] = b.split("-").map(Number);
+    return (dayA - dayB) || (hourA - hourB);
+  });
 }

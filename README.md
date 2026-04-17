@@ -18,6 +18,8 @@ Set these environment variables in Vercel:
 - `AI_API_KEY`
 - `AI_MODEL`
 - `AI_TRANSCRIPTION_MODEL`
+- `KV_REST_API_URL` or `UPSTASH_REDIS_REST_URL`
+- `KV_REST_API_TOKEN` or `UPSTASH_REDIS_REST_TOKEN`
 
 Recommended values for your current provider:
 
@@ -27,10 +29,24 @@ Recommended values for your current provider:
 
 Use your own purchased API key as `AI_API_KEY`.
 
+## Shared sync across phone and desktop
+
+Phone and desktop sync now uses a shared KV store through `/api/state`.
+
+If you want all devices to see the same submissions and todo list, add one of these pairs in Vercel:
+
+- `KV_REST_API_URL` + `KV_REST_API_TOKEN`
+- or `UPSTASH_REDIS_REST_URL` + `UPSTASH_REDIS_REST_TOKEN`
+
+Optional:
+
+- `JAMLY_STATE_KEY=jamly:shared-state`
+
 ## Project layout
 
 - `index.html` - page structure
 - `styles.css` - desktop and mobile layout
-- `script.js` - browser logic and local storage state
+- `script.js` - browser logic, shared sync, and overlap formatting
 - `api/parse.js` - secure server-side availability parser
+- `api/state.js` - shared phone/desktop state sync
 - `api/transcribe.js` - secure server-side speech-to-text proxy
