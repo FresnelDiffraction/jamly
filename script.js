@@ -76,7 +76,6 @@ let isRecording = false;
 let isSubmitting = false;
 let remoteSyncTimer = null;
 let voiceStopRequested = false;
-let voiceShouldSubmit = false;
 
 bootstrap().catch((error) => {
   console.error("Jamly bootstrap failed:", error);
@@ -508,14 +507,18 @@ function extractDays(part) {
 }
 
 function extractHours(part) {
+  const hasExplicitRange = /(\d{1,2})点\s*(?:到|至|\-|~|～)\s*(\d{1,2})点/g.test(part);
+  const hasAfterPattern = /(\d{1,2})点(?:以后|之后|后)/g.test(part);
   const hours = new Set();
 
-  timeWords.forEach(({ regex, hours: mapped }) => {
-    if (regex.test(part)) {
-      mapped.forEach((hour) => hours.add(hour));
-    }
-    regex.lastIndex = 0;
-  });
+  if (!hasExplicitRange && !hasAfterPattern) {
+    timeWords.forEach(({ regex, hours: mapped }) => {
+      if (regex.test(part)) {
+        mapped.forEach((hour) => hours.add(hour));
+      }
+      regex.lastIndex = 0;
+    });
+  }
 
   for (const match of part.matchAll(/(\d{1,2})点(?:以后|之后|后)/g)) {
     const start = normalizeHour(Number(match[1]));
@@ -725,14 +728,13 @@ function setupVoiceRecognition() {
 
     if (transcript) {
       messageInput.value = transcript;
-      setSupportText("正在持续识别，你可以停下来想一会，点按钮时才会结束并提交。");
+      setSupportText("正在持续识别，你可以停下来想一会，点按钮时才会结束。结束后请自己确认并点发送。");
     }
   };
 
   speechRecognition.onerror = () => {
     isRecording = false;
     voiceStopRequested = false;
-    voiceShouldSubmit = false;
     voiceButton.classList.remove("recording");
     voiceButton.textContent = "点击开始说话";
     setSupportText("语音识别失败了，你可以再试一次，或者直接手动输入文字。");
@@ -742,32 +744,29 @@ function setupVoiceRecognition() {
     if (isRecording && !voiceStopRequested && !isSubmitting) {
       try {
         speechRecognition.start();
-        setSupportText("我还在继续听，结束时再点一次按钮发送。");
+        setSupportText("我还在继续听，结束时再点一次按钮。");
         return;
       } catch (error) {
         // fall through to reset UI below
       }
     }
-
-    const shouldSubmit = voiceShouldSubmit;
+    const endedByUser = voiceStopRequested;
     isRecording = false;
     voiceStopRequested = false;
-    voiceShouldSubmit = false;
     voiceButton.classList.remove("recording");
     voiceButton.textContent = "点击开始说话";
 
-    if (!shouldSubmit) {
-      return;
-    }
-
-    const transcript = messageInput.value.trim();
-    if (!transcript) {
+    if (!messageInput.value.trim()) {
       setSupportText("没有识别到文字，再试一次吧。");
       return;
     }
 
-    setSupportText("识别完成，正在自动提交...");
-    await submitAvailability(transcript);
+    if (endedByUser) {
+      setSupportText("语音已结束，文字已经保留。确认无误后再点发送。");
+      return;
+    }
+
+    setSupportText("语音暂时停下来了，我没有帮你自动发送。你可以继续点开始说话，或者直接点发送。");
   };
 
   voiceButton.addEventListener("click", () => {
@@ -790,16 +789,14 @@ function startVoiceRecognition() {
   try {
     isRecording = true;
     voiceStopRequested = false;
-    voiceShouldSubmit = false;
     messageInput.value = "";
     voiceButton.classList.add("recording");
     voiceButton.textContent = "点击结束并发送";
-    setSupportText("正在持续识别，你可以停顿思考，想结束时再点一次按钮发送。");
+    setSupportText("正在持续识别，你可以停顿思考，想结束时再点一次按钮。");
     speechRecognition.start();
   } catch (error) {
     isRecording = false;
     voiceStopRequested = false;
-    voiceShouldSubmit = false;
     voiceButton.classList.remove("recording");
     voiceButton.textContent = "点击开始说话";
     setSupportText("无法开始语音识别，请检查浏览器权限后再试。");
@@ -811,8 +808,7 @@ function stopVoiceRecognition() {
     return;
   }
   voiceStopRequested = true;
-  voiceShouldSubmit = true;
-  setSupportText("已结束语音，正在整理文字...");
+  setSupportText("已结束语音，正在整理文字，请稍等...");
   speechRecognition.stop();
 }
 
