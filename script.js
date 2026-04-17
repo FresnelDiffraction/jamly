@@ -3,7 +3,7 @@ const MEMBERS = ["cold", "david", "圈", "星", "小安", "afai"];
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const OPEN_HOURS = Array.from({ length: 13 }, (_, index) => index + 10);
 const REMOTE_SYNC_INTERVAL = 45000;
-const DEFAULT_ALL_PATTERN = /(其他时候都可以|其他都可以|其余都可以|剩下都可以|除此之外都可以|别的时候都可以|别的时间都可以|其余时间都可以)/;
+const DEFAULT_ALL_PATTERN = /(其他时候(?:都|也|基本)?(?:是)?可以|其他都可以|其余都可以|剩下都可以|除此之外都可以|别的时候都可以|别的时间都可以|其余时间都可以|其他时候都行|其他时间都行|都可以的|都是可以的)/;
 const NEGATIVE_PATTERN = /(不行|没空|有事|不能|不可以|不太行|约了|吃饭|上班|加班|有课|开会|考试|排满|忙)/;
 const POSITIVE_PATTERN = /(可以|有空|都行|能来|能排练|ok|OK|行)/;
 const RANGE_PATTERN = /(?:周|星期|礼拜)([一二三四五六日天])(?:到|至|-|—|~|～)(?:周|星期|礼拜)?([一二三四五六日天])/g;
@@ -419,7 +419,7 @@ async function parseAvailabilitySmart(rawText) {
 
 function parseAvailability(rawText) {
   const text = normalizeText(rawText);
-  if (/(这周都可以|这周都行|整周都可以|整周都行|我这周都可以|我这周都有空)/.test(text)) {
+  if (hasFullWeekAvailability(text)) {
     const availableSlots = buildAllWeekSlots();
     return {
       availableSlots,
@@ -430,7 +430,7 @@ function parseAvailability(rawText) {
   const clauses = buildClauses(text);
   const hasPositiveClause = clauses.some((clause) => clause.polarity === "positive");
   const hasNegativeClause = clauses.some((clause) => clause.polarity === "negative");
-  const assumeAllOpen = DEFAULT_ALL_PATTERN.test(text) || (hasNegativeClause && !hasPositiveClause);
+  const assumeAllOpen = impliesBroadAvailability(text) || (hasNegativeClause && !hasPositiveClause);
   const slots = new Set(assumeAllOpen ? buildAllWeekSlots() : []);
 
   clauses.forEach((clause) => {
@@ -457,6 +457,7 @@ function parseAvailability(rawText) {
 function buildClauses(text) {
   const parts = text
     .replace(/[，。；]/g, ",")
+    .replace(/(?<!到)(?<!至)(?<!-)(?<!—)(?<!~)(?<!～)(?=(?:周|星期|礼拜)[一二三四五六日天])/g, ",")
     .split(/,|并且|然后|而且|但是|其他时候都可以|其他都可以|其余都可以|剩下都可以|除此之外都可以|别的时候都可以|别的时间都可以|其余时间都可以/g)
     .map((part) => part.trim())
     .filter(Boolean);
@@ -582,7 +583,7 @@ function shouldPreferLocal(rawText, localParsed, remoteParsed) {
   }
 
   const text = normalizeText(rawText);
-  if (DEFAULT_ALL_PATTERN.test(text)) {
+  if (impliesBroadAvailability(text)) {
     return true;
   }
 
@@ -604,6 +605,17 @@ function normalizeHour(hour) {
     return hour + 12;
   }
   return hour;
+}
+
+function hasFullWeekAvailability(text) {
+  return /(这周都可以|这周都行|整周都可以|整周都行|我这周都可以|我这周都有空|这周所有时间都可以|这周全部时间都可以|这周都有空)/.test(text);
+}
+
+function impliesBroadAvailability(text) {
+  return hasFullWeekAvailability(text)
+    || DEFAULT_ALL_PATTERN.test(text)
+    || /除了.+(?:都|也|基本)?(?:是)?可以/.test(text)
+    || /其他时候.+可以/.test(text);
 }
 
 function expandDayRange(start, end) {
@@ -791,7 +803,7 @@ function startVoiceRecognition() {
     voiceStopRequested = false;
     messageInput.value = "";
     voiceButton.classList.add("recording");
-    voiceButton.textContent = "点击结束并发送";
+    voiceButton.textContent = "点击结束录音";
     setSupportText("正在持续识别，你可以停顿思考，想结束时再点一次按钮。");
     speechRecognition.start();
   } catch (error) {
