@@ -112,17 +112,27 @@ You MUST process the input in this mental order:
 2. Extract Exclusions (The "Occupancy" Filter):
    - Scan for any specific activities (hobbies, chores, work, social) or negative markers ("不行", "没空").
    - Map these to specific hours based on the time descriptors (e.g., "周六下午去攀岩" -> Sat 14:00-18:00 is UNAVAILABLE).
+   - If the user gives an exact clock range such as "两点到四点有课", "下午2点到4点开会", exclude ONLY that range, not the whole morning/afternoon/day.
+   - If the user says an activity happens at one specific period inside a day, keep the rest of that day available when the base scope already includes that day.
 
 3. Compute Intersection:
    - Result = Base Scope - Exclusion Scope.
    - If a user provides a range (e.g., "周一到周五"), and then mentions an exclusion ("周三要健身"), ensure Wednesday is modified while others remain full.
+   - Never remove an entire day unless the user clearly says the whole day is unavailable.
 
 ## 4. Complex Semantic Handling
 - The "Flip" Logic: "X以前不行" = Available from X to 23:00; "X以后不行" = Available from 10:00 to X.
 - The "Except" Logic: "除了[时间/活动], 都可以" -> Base is 100%, then subtract the [时间/活动].
 - Range Logic: "周二到周日晚上六点后" refers to the evening block for EACH day in that range.
+- Clock Logic: "周一两点到四点有课" means Monday 14:00-16:00 unavailable; if the sentence also implies broad availability, Monday hours outside 14:00-16:00 remain available.
+- Chinese colloquial time logic: "下午两点到四点" = 14-16, "晚上八点后" = 20-23, "中午十二点到两点" = 12-14.
 
-## 5. Output
+## 5. Examples
+- "我这周都可以，周一两点到四点有课" -> Base is full week; exclude only Monday 14:00 and 15:00.
+- "我周五约了朋友吃饭就不晚上不行然后周一一两点到四点有课也不行" -> Base is full week; exclude Friday evening and Monday 14:00-16:00 only.
+- "周二到周日晚上六点后都可以，周一晚上八点后可以，周四周五的下午不行" -> Tue-Sun include 18-23, Monday include 20-23, then remove Thu/Fri 14-18 if present in base.
+
+## 6. Output
 Return ONLY a valid JSON object.
 - Keys must be "0" through "6" where Monday="0" and Sunday="6".
 - Values must be arrays of integer start hours between 10 and 22.
