@@ -49,7 +49,13 @@ module.exports = async function handler(req, res) {
     "Use Monday=0 through Sunday=6, hour 10-22 only.",
     "The rehearsal room is open from 10:00 to 23:00, so ignore any time outside that range.",
     "If the user says the whole week is available, return all open hours in the week.",
+    "Understand ranges such as 周一到周五, 星期一至星期五, and 周末.",
+    "If the user only mentions unavailable times, infer that all other open hours are available.",
+    "If the user says 其他时候都可以 or similar, subtract the unavailable slots from the full week.",
+    "Treat phrases like 约了朋友吃饭, 加班, 上班, 有课, 开会 as unavailable unless the user explicitly says they are available.",
     "If wording is ambiguous, make a conservative reasonable guess.",
+    "Example: 周五晚上不可以其他时候都可以 => all open hours except Friday evening.",
+    "Example: 周五晚上约了朋友吃饭然后周一到周五的早上都不行 => full week open except Friday evening and weekday mornings.",
     "Return only JSON matching the schema."
   ].join(" ");
 

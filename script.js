@@ -3,6 +3,11 @@ const MEMBERS = ["cold", "david", "圈", "星", "小安", "afai"];
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const OPEN_HOURS = Array.from({ length: 13 }, (_, index) => index + 10);
 const REMOTE_SYNC_INTERVAL = 45000;
+const DEFAULT_ALL_PATTERN = /(其他时候都可以|其他都可以|其余都可以|剩下都可以|除此之外都可以|别的时候都可以|别的时间都可以|其余时间都可以)/;
+const NEGATIVE_PATTERN = /(不行|没空|有事|不能|不可以|不太行|约了|吃饭|上班|加班|有课|开会|考试|排满|忙)/;
+const POSITIVE_PATTERN = /(可以|有空|都行|能来|能排练|ok|OK|行)/;
+const RANGE_PATTERN = /(?:周|星期|礼拜)([一二三四五六日天])(?:到|至|-|—|~|～)(?:周|星期|礼拜)?([一二三四五六日天])/g;
+const DAY_CHAR_INDEX = { "一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6 };
 
 const dayAliases = {
   "周一": 0,
@@ -358,6 +363,7 @@ function formatSlotsByDay(slots) {
 }
 
 async function parseAvailabilitySmart(rawText) {
+  const localParsed = parseAvailability(rawText);
   try {
     const response = await fetch("/api/parse", {
       method: "POST",
@@ -368,16 +374,17 @@ async function parseAvailabilitySmart(rawText) {
     if (response.ok) {
       const data = await response.json();
       const availableSlots = sanitizeSlots(data.availableSlots || []);
-      return {
+      const remoteParsed = {
         availableSlots,
         summary: buildAvailabilitySummary(availableSlots) || data.summary || "暂时没有识别到明确可用时间。"
       };
+      return chooseParsedResult(rawText, localParsed, remoteParsed);
     }
   } catch (error) {
     console.warn("Remote parse failed, fallback to local parser:", error);
   }
 
-  return parseAvailability(rawText);
+  return localParsed;
 }
 
 function parseAvailability(rawText) {
@@ -390,79 +397,83 @@ function parseAvailability(rawText) {
     };
   }
 
-  const entries = buildDayEntries(text);
-  const slots = [];
+  const clauses = buildClauses(text);
+  const hasPositiveClause = clauses.some((clause) => clause.polarity === "positive");
+  const hasNegativeClause = clauses.some((clause) => clause.polarity === "negative");
+  const assumeAllOpen = DEFAULT_ALL_PATTERN.test(text) || (hasNegativeClause && !hasPositiveClause);
+  const slots = new Set(assumeAllOpen ? buildAllWeekSlots() : []);
 
-  entries.forEach((entry) => {
-    entry.hours.forEach((hour) => slots.push(makeSlot(entry.day, hour)));
+  clauses.forEach((clause) => {
+    const targetHours = clause.hours.length ? clause.hours : OPEN_HOURS;
+    clause.days.forEach((day) => {
+      targetHours.forEach((hour) => {
+        const slot = makeSlot(day, hour);
+        if (clause.polarity === "negative") {
+          slots.delete(slot);
+        } else {
+          slots.add(slot);
+        }
+      });
+    });
   });
 
-  const availableSlots = sanitizeSlots(Array.from(new Set(slots)).sort());
+  const availableSlots = sanitizeSlots(Array.from(slots));
   return {
     availableSlots,
     summary: buildAvailabilitySummary(availableSlots) || "暂时没有识别到明确可用时间，你可以补一句更具体的描述。"
   };
 }
 
-function buildDayEntries(text) {
-  const entries = [];
+function buildClauses(text) {
   const parts = text
     .replace(/[，。；]/g, ",")
-    .split(/,|并且|然后|而且|但是/g)
+    .split(/,|并且|然后|而且|但是|其他时候都可以|其他都可以|其余都可以|剩下都可以|除此之外都可以|别的时候都可以|别的时间都可以|其余时间都可以/g)
     .map((part) => part.trim())
     .filter(Boolean);
-
-  parts.forEach((part) => {
-    const days = extractDays(part);
-    if (!days.length) {
-      return;
-    }
-
-    const decision = parsePartHours(part);
-    days.forEach((day) => {
-      entries.push({ day, hours: decision.hours });
-    });
-  });
-
-  return mergeDayEntries(entries);
+  return parts
+    .map((part) => {
+      const days = extractDays(part);
+      if (!days.length) {
+        return null;
+      }
+      const hours = extractHours(part);
+      return {
+        days,
+        hours,
+        polarity: getClausePolarity(part)
+      };
+    })
+    .filter(Boolean);
 }
 
 function extractDays(part) {
   const found = new Set();
+  const rangePart = part.replace(/\s+/g, "");
+
+  for (const match of rangePart.matchAll(RANGE_PATTERN)) {
+    const start = DAY_CHAR_INDEX[match[1]];
+    const end = DAY_CHAR_INDEX[match[2]];
+    if (Number.isInteger(start) && Number.isInteger(end)) {
+      const stepDays = expandDayRange(start, end);
+      stepDays.forEach((day) => found.add(day));
+    }
+  }
 
   Object.entries(dayAliases).forEach(([label, index]) => {
-    if (part.includes(label)) {
+    if (rangePart.includes(label)) {
       found.add(index);
     }
   });
 
-  if (/工作日/.test(part)) {
+  if (/工作日/.test(rangePart)) {
     [0, 1, 2, 3, 4].forEach((day) => found.add(day));
   }
 
-  if (/周末/.test(part)) {
+  if (/周末/.test(rangePart)) {
     [5, 6].forEach((day) => found.add(day));
   }
 
   return Array.from(found).sort((a, b) => a - b);
-}
-
-function parsePartHours(part) {
-  const negated = /(不行|没空|有事|不能|不可以|不太行)/.test(part);
-  const hours = extractHours(part);
-
-  if (negated) {
-    if (!hours.length) {
-      return { hours: [] };
-    }
-    return { hours: OPEN_HOURS.filter((hour) => !hours.includes(hour)) };
-  }
-
-  if (!hours.length) {
-    return { hours: OPEN_HOURS.slice() };
-  }
-
-  return { hours };
 }
 
 function extractHours(part) {
@@ -506,6 +517,54 @@ function extractHours(part) {
     .sort((a, b) => a - b);
 }
 
+function getClausePolarity(part) {
+  const hasNegative = NEGATIVE_PATTERN.test(part);
+  const hasPositive = POSITIVE_PATTERN.test(part);
+
+  if (hasNegative && !hasPositive) {
+    return "negative";
+  }
+  if (hasNegative && hasPositive) {
+    return /其他|其余|剩下|除此之外/.test(part) ? "positive" : "negative";
+  }
+  return "positive";
+}
+
+function chooseParsedResult(rawText, localParsed, remoteParsed) {
+  if (!remoteParsed.availableSlots.length && localParsed.availableSlots.length) {
+    return localParsed;
+  }
+
+  if (shouldPreferLocal(rawText, localParsed, remoteParsed)) {
+    return localParsed;
+  }
+
+  return remoteParsed.availableSlots.length ? remoteParsed : localParsed;
+}
+
+function shouldPreferLocal(rawText, localParsed, remoteParsed) {
+  if (!localParsed.availableSlots.length) {
+    return false;
+  }
+
+  const text = normalizeText(rawText);
+  if (DEFAULT_ALL_PATTERN.test(text)) {
+    return true;
+  }
+
+  if (NEGATIVE_PATTERN.test(text) && !POSITIVE_PATTERN.test(text)) {
+    return true;
+  }
+
+  if (RANGE_PATTERN.test(text)) {
+    RANGE_PATTERN.lastIndex = 0;
+    return true;
+  }
+
+  RANGE_PATTERN.lastIndex = 0;
+  return remoteParsed.availableSlots.length < localParsed.availableSlots.length / 2;
+}
+
 function normalizeHour(hour) {
   if (hour >= 0 && hour <= 7) {
     return hour + 12;
@@ -513,20 +572,11 @@ function normalizeHour(hour) {
   return hour;
 }
 
-function mergeDayEntries(entries) {
-  const merged = new Map();
-  entries.forEach((entry) => {
-    const existing = merged.get(entry.day) || new Set();
-    entry.hours.forEach((hour) => existing.add(hour));
-    merged.set(entry.day, existing);
-  });
-
-  return Array.from(merged.entries())
-    .map(([day, hours]) => ({
-      day,
-      hours: Array.from(hours).sort((a, b) => a - b)
-    }))
-    .sort((a, b) => a.day - b.day);
+function expandDayRange(start, end) {
+  if (start <= end) {
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  }
+  return [start, end];
 }
 
 function findCommonSlots() {
