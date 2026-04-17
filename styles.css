@@ -1,15 +1,17 @@
 :root {
-  color-scheme: light;
-  --bg: #f3efe7;
-  --panel: rgba(255, 252, 247, 0.94);
-  --panel-strong: #fffaf2;
-  --ink: #1f2b23;
-  --muted: #5f6e63;
-  --line: rgba(31, 43, 35, 0.12);
-  --accent: #1f7a5b;
-  --accent-soft: rgba(31, 122, 91, 0.12);
-  --danger: #d95d39;
-  --shadow: 0 18px 44px rgba(25, 38, 30, 0.11);
+  color-scheme: dark;
+  --bg: #081012;
+  --panel: rgba(7, 16, 18, 0.74);
+  --panel-strong: rgba(11, 24, 27, 0.82);
+  --panel-soft: rgba(14, 32, 35, 0.7);
+  --ink: #eef6f2;
+  --muted: rgba(223, 236, 231, 0.72);
+  --line: rgba(198, 234, 221, 0.14);
+  --accent: #5fd3b0;
+  --accent-strong: #2bb388;
+  --accent-soft: rgba(95, 211, 176, 0.16);
+  --danger: #ef7e6d;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
   --radius-xl: 28px;
   --radius-lg: 20px;
 }
@@ -22,10 +24,22 @@ body {
   font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
   color: var(--ink);
   background:
-    radial-gradient(circle at top left, rgba(212, 134, 79, 0.14), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(31, 122, 91, 0.12), transparent 30%),
-    linear-gradient(180deg, #f8f4ec 0%, var(--bg) 100%);
+    linear-gradient(180deg, rgba(4, 9, 10, 0.56) 0%, rgba(4, 9, 10, 0.78) 100%),
+    radial-gradient(circle at top left, rgba(61, 159, 139, 0.18), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(64, 112, 162, 0.24), transparent 34%),
+    url("./img/合照.jpg") center / cover fixed no-repeat;
   -webkit-text-size-adjust: 100%;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, rgba(5, 11, 13, 0.7), rgba(5, 11, 13, 0.42)),
+    radial-gradient(circle at 20% 10%, rgba(88, 175, 157, 0.16), transparent 24%),
+    radial-gradient(circle at 80% 20%, rgba(90, 114, 203, 0.14), transparent 26%);
 }
 
 button,
@@ -41,6 +55,8 @@ h1, h2, p {
 }
 
 .app-shell {
+  position: relative;
+  z-index: 1;
   max-width: 1440px;
   margin: 0 auto;
   padding: 20px;
@@ -54,8 +70,8 @@ h1, h2, p {
 .chat-panel,
 .summary-card {
   background: var(--panel);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--line);
   box-shadow: var(--shadow);
 }
 
@@ -66,23 +82,34 @@ h1, h2, p {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
+  background:
+    linear-gradient(135deg, rgba(13, 27, 31, 0.88), rgba(8, 15, 18, 0.68));
 }
 
 .brand-lockup {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
+}
+
+.brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 .brand-logo {
-  width: 58px;
-  height: 58px;
+  width: 70px;
+  height: 70px;
+  border-radius: 20px;
+  object-fit: cover;
+  box-shadow: 0 14px 26px rgba(0, 0, 0, 0.28);
 }
 
 .eyebrow {
-  margin: 0 0 6px;
+  margin: 0 0 4px;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.16em;
   font-size: 12px;
   color: var(--muted);
 }
@@ -90,10 +117,18 @@ h1, h2, p {
 h1 {
   font-size: 34px;
   line-height: 1;
+  letter-spacing: 0.01em;
 }
 
 h2 {
   font-size: 24px;
+}
+
+.brand-tagline {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(232, 242, 238, 0.76);
+  max-width: 620px;
 }
 
 .member-select-wrap {
@@ -101,12 +136,22 @@ h2 {
   align-items: center;
   gap: 10px;
   color: var(--muted);
-  min-width: 220px;
+}
+
+.composer-member-select {
+  min-width: 200px;
+  padding: 0 4px 0 0;
+}
+
+.composer-member-select label {
+  white-space: nowrap;
 }
 
 .todo-banner {
   border-radius: var(--radius-xl);
   padding: 20px 22px;
+  background:
+    linear-gradient(135deg, rgba(9, 23, 26, 0.88), rgba(11, 20, 27, 0.72));
 }
 
 .todo-banner-header {
@@ -156,6 +201,8 @@ h2 {
   flex-direction: column;
   gap: 16px;
   min-height: 760px;
+  background:
+    linear-gradient(160deg, rgba(8, 21, 25, 0.9), rgba(6, 13, 16, 0.72));
 }
 
 .chat-header,
@@ -176,9 +223,10 @@ select,
 input,
 textarea {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(205, 237, 227, 0.12);
   border-radius: 14px;
-  background: white;
+  background: rgba(241, 250, 246, 0.08);
+  color: var(--ink);
 }
 
 select,
@@ -195,19 +243,27 @@ textarea {
   font-size: 16px;
 }
 
+textarea::placeholder,
+input::placeholder {
+  color: rgba(223, 236, 231, 0.46);
+}
+
 .deadline-strip {
   border-radius: 18px;
-  background: linear-gradient(135deg, rgba(31, 122, 91, 0.13), rgba(212, 134, 79, 0.14));
+  background: linear-gradient(135deg, rgba(95, 211, 176, 0.13), rgba(94, 123, 232, 0.16));
+  border: 1px solid rgba(187, 234, 221, 0.12);
   padding: 14px 16px;
   line-height: 1.6;
+  color: rgba(242, 247, 245, 0.9);
 }
 
 .chat-messages {
   flex: 1;
   min-height: 380px;
   border-radius: 24px;
-  background: linear-gradient(180deg, rgba(238, 251, 244, 0.84), rgba(247, 242, 232, 0.92));
-  border: 1px solid rgba(31, 43, 35, 0.08);
+  background:
+    linear-gradient(180deg, rgba(10, 27, 31, 0.78), rgba(12, 19, 23, 0.74));
+  border: 1px solid rgba(198, 234, 221, 0.12);
   padding: 20px 16px;
   overflow: auto;
   display: flex;
@@ -224,21 +280,23 @@ textarea {
 
 .message.user {
   align-self: flex-end;
-  background: linear-gradient(135deg, #b8ef9f, #9fe483);
+  background: linear-gradient(135deg, rgba(94, 211, 176, 0.92), rgba(54, 170, 136, 0.86));
+  color: #042018;
   border-bottom-right-radius: 6px;
 }
 
 .message.bot {
   align-self: flex-start;
-  background: white;
+  background: rgba(238, 246, 243, 0.09);
   border-bottom-left-radius: 6px;
-  border: 1px solid rgba(31, 43, 35, 0.08);
+  border: 1px solid rgba(198, 234, 221, 0.1);
+  color: var(--ink);
 }
 
 .message small {
   display: block;
   margin-top: 8px;
-  color: var(--muted);
+  color: rgba(223, 236, 231, 0.58);
 }
 
 .composer {
@@ -257,6 +315,7 @@ textarea {
 .composer-actions {
   margin-top: 12px;
   display: flex;
+  align-items: center;
   gap: 12px;
 }
 
@@ -285,18 +344,19 @@ textarea {
 }
 
 .primary-button {
-  background: var(--accent);
-  color: white;
-  box-shadow: 0 10px 18px rgba(31, 122, 91, 0.2);
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  color: #041612;
+  box-shadow: 0 10px 20px rgba(43, 179, 136, 0.22);
 }
 
 .ghost-button {
-  background: rgba(31, 43, 35, 0.06);
+  background: rgba(237, 246, 242, 0.08);
   color: var(--ink);
+  border: 1px solid rgba(198, 234, 221, 0.08);
 }
 
 .hold-button.recording {
-  background: var(--danger);
+  background: linear-gradient(135deg, #f1997f, var(--danger));
   color: white;
 }
 
@@ -309,6 +369,8 @@ textarea {
 .summary-card {
   border-radius: var(--radius-xl);
   padding: 22px;
+  background:
+    linear-gradient(160deg, rgba(8, 19, 23, 0.88), rgba(8, 15, 18, 0.72));
 }
 
 .summary-content,
@@ -325,10 +387,10 @@ textarea {
 .todo-item,
 .slot-item,
 .status-card {
-  border: 1px solid var(--line);
+  border: 1px solid rgba(198, 234, 221, 0.12);
   border-radius: 18px;
   padding: 14px 16px;
-  background: var(--panel-strong);
+  background: rgba(242, 251, 247, 0.07);
 }
 
 .todo-time,
@@ -339,11 +401,11 @@ textarea {
 }
 
 .status-card.pending {
-  background: rgba(255, 248, 238, 0.92);
+  background: rgba(255, 193, 139, 0.08);
 }
 
 .status-card.done {
-  background: rgba(241, 252, 246, 0.96);
+  background: rgba(95, 211, 176, 0.08);
 }
 
 .pill {
@@ -357,12 +419,12 @@ textarea {
 
 .pill.done {
   color: var(--accent);
-  background: var(--accent-soft);
+  background: rgba(95, 211, 176, 0.14);
 }
 
 .pill.pending {
-  color: #b36a34;
-  background: rgba(212, 134, 79, 0.14);
+  color: #ffcb8f;
+  background: rgba(255, 188, 122, 0.12);
 }
 
 @media (max-width: 1120px) {
@@ -396,23 +458,27 @@ textarea {
     align-items: stretch;
   }
 
+  .brand-tagline {
+    max-width: none;
+  }
+
   .header-actions {
     width: 100%;
     flex-direction: column;
   }
 
-  .member-select-wrap {
-    min-width: 0;
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .member-select-wrap select {
-    flex: 1;
-  }
-
   .todo-form-inline {
     grid-template-columns: 1fr;
+  }
+
+  .composer-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .composer-member-select {
+    width: 100%;
+    min-width: 0;
   }
 
   .chat-messages {
@@ -438,15 +504,6 @@ textarea {
     font-size: 21px;
   }
 
-  .composer-actions {
-    flex-direction: column;
-  }
-
-  .composer-actions .primary-button,
-  .composer-actions .ghost-button {
-    width: 100%;
-  }
-
   .message {
     max-width: 94%;
     padding: 12px 14px;
@@ -460,6 +517,11 @@ textarea {
 @media (max-width: 420px) {
   .app-shell {
     padding: 10px;
+  }
+
+  .brand-logo {
+    width: 58px;
+    height: 58px;
   }
 
   .chat-messages {
