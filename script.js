@@ -424,21 +424,19 @@ function setComposerState(disabled) {
 
 function setupVoiceRecorder() {
   if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-    voiceSupport.textContent = "当前浏览器不支持按住录音，建议用 Chrome 或 Edge 测试。";
+    voiceSupport.textContent = "当前浏览器不支持录音，建议用 Chrome 或 Edge 测试。";
     voiceButton.disabled = true;
     return;
   }
-  ["pointerdown", "touchstart"].forEach((eventName) => {
-    voiceButton.addEventListener(eventName, (event) => {
-      event.preventDefault();
-      startVoiceRecording();
-    });
-  });
-  ["pointerup", "pointerleave", "pointercancel", "touchend", "touchcancel"].forEach((eventName) => {
-    voiceButton.addEventListener(eventName, (event) => {
-      event.preventDefault();
+  voiceButton.addEventListener("click", () => {
+    if (isSubmitting) {
+      return;
+    }
+    if (isRecording) {
       stopVoiceRecording();
-    });
+      return;
+    }
+    startVoiceRecording();
   });
 }
 
@@ -459,8 +457,8 @@ async function startVoiceRecording() {
     mediaRecorder.start();
     isRecording = true;
     voiceButton.classList.add("recording");
-    voiceButton.textContent = "松开发送";
-    voiceSupport.textContent = "正在录音，松开后会自动转写并提交。";
+    voiceButton.textContent = "点击结束并发送";
+    voiceSupport.textContent = "正在录音，录完后再点一次按钮发送。";
   } catch (error) {
     voiceSupport.textContent = "麦克风无法启用，请检查浏览器权限后再试。";
   }
@@ -472,7 +470,7 @@ function stopVoiceRecording() {
   }
   isRecording = false;
   voiceButton.classList.remove("recording");
-  voiceButton.textContent = "按住说话，松开发送";
+  voiceButton.textContent = "点击开始说话";
   voiceSupport.textContent = "录音完成，正在上传并转写...";
   mediaRecorder.stop();
 }
@@ -536,7 +534,7 @@ function cleanupRecorder() {
   audioChunks = [];
   isRecording = false;
   voiceButton.classList.remove("recording");
-  voiceButton.textContent = "按住说话，松开发送";
+  voiceButton.textContent = "点击开始说话";
 }
 
 function buildAllWeekSlots() {
