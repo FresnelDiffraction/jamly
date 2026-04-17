@@ -95,7 +95,7 @@ async function tryDirectTranscription({ baseUrl, apiKey, model, audioBase64, mim
 }
 
 async function transcribeViaResponses({ baseUrl, apiKey, model, audioBase64, mimeType }) {
-  const format = inferAudioFormat(mimeType);
+  const extension = inferAudioFormat(mimeType);
   const response = await fetch(`${baseUrl}/responses`, {
     method: "POST",
     headers: {
@@ -118,11 +118,13 @@ async function transcribeViaResponses({ baseUrl, apiKey, model, audioBase64, mim
           role: "user",
           content: [
             {
-              type: "input_audio",
-              input_audio: {
-                data: audioBase64,
-                format
-              }
+              type: "input_file",
+              filename: `jamly-recording.${extension}`,
+              file_data: `data:${mimeType};base64,${audioBase64}`
+            },
+            {
+              type: "input_text",
+              text: "Please transcribe this audio file into simplified Chinese. Return only the transcript."
             }
           ]
         }
