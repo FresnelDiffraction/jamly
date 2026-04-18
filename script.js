@@ -1,57 +1,8 @@
-const STORAGE_KEY = "jamly-app-v2";
+const STORAGE_KEY = "jamly-app-v3";
 const MEMBERS = ["cold", "david", "圈", "星", "小安", "afai"];
 const WEEKDAYS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const OPEN_HOURS = Array.from({ length: 13 }, (_, index) => index + 10);
 const REMOTE_SYNC_INTERVAL = 45000;
-const DEFAULT_ALL_PATTERN = /(其他时候(?:都|也|基本)?(?:是)?可以|其他都可以|其余都可以|剩下都可以|除此之外都可以|别的时候都可以|别的时间都可以|其余时间都可以|其他时候都行|其他时间都行|都可以的|都是可以的)/;
-const NEGATIVE_PATTERN = /(不行|没空|有事|不能|不可以|不太行|约了|吃饭|上班|加班|有课|开会|考试|排满|忙)/;
-const POSITIVE_PATTERN = /(可以|有空|都行|能来|能排练|ok|OK|行)/;
-const RANGE_PATTERN = /(?:周|星期|礼拜)([一二三四五六日天])(?:到|至|-|—|~|～)(?:周|星期|礼拜)?([一二三四五六日天])/g;
-const DAY_CHAR_INDEX = { "一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6 };
-
-const dayAliases = {
-  "周一": 0,
-  "星期一": 0,
-  "礼拜一": 0,
-  "周二": 1,
-  "星期二": 1,
-  "礼拜二": 1,
-  "周三": 2,
-  "星期三": 2,
-  "礼拜三": 2,
-  "周四": 3,
-  "星期四": 3,
-  "礼拜四": 3,
-  "周五": 4,
-  "星期五": 4,
-  "礼拜五": 4,
-  "周六": 5,
-  "星期六": 5,
-  "礼拜六": 5,
-  "周日": 6,
-  "周天": 6,
-  "星期日": 6,
-  "星期天": 6,
-  "礼拜日": 6,
-  "礼拜天": 6
-};
-
-const timeWords = [
-  { regex: /(全天|整天|都可以|都行|都有空|全都可以)/g, hours: OPEN_HOURS.slice() },
-  { regex: /(白天)/g, hours: [10, 11, 12, 13, 14, 15, 16, 17] },
-  { regex: /(上午)/g, hours: [10, 11] },
-  { regex: /(中午)/g, hours: [12, 13] },
-  { regex: /(下午)/g, hours: [14, 15, 16, 17] },
-  { regex: /(傍晚)/g, hours: [17, 18] },
-  { regex: /(晚上|晚间|夜里)/g, hours: [18, 19, 20, 21, 22] }
-];
-
-const emptyState = () => ({
-  messages: [],
-  submissions: {},
-  todos: [],
-  updatedAt: 0
-});
 
 const state = normalizeState(loadLocalState());
 
@@ -94,13 +45,7 @@ async function bootstrap() {
   resetButton.addEventListener("click", resetState);
   clearMemberButton.addEventListener("click", clearCurrentMemberState);
   todoForm.addEventListener("submit", handleTodoSubmit);
-
-  document.querySelectorAll("[data-example]").forEach((button) => {
-    button.addEventListener("click", () => {
-      messageInput.value = button.dataset.example;
-      messageInput.focus();
-    });
-  });
+  tabsBackButton?.addEventListener("click", () => renderTabs(""));
 
   await syncStateFromServer({ allowUploadLocal: true, silent: false });
 
@@ -117,17 +62,13 @@ async function bootstrap() {
   remoteSyncTimer = window.setInterval(() => {
     syncStateFromServer({ allowUploadLocal: false, silent: true });
   }, REMOTE_SYNC_INTERVAL);
-
-  tabsBackButton?.addEventListener("click", () => {
-    renderTabs("");
-  });
 }
 
 async function handleSubmit(event) {
   event.preventDefault();
   const rawText = messageInput.value.trim();
   if (!rawText) {
-    setSupportText("请先输入一句话，再提交。");
+    setSupportText("先输入一句话，再提交。");
     return;
   }
 
@@ -140,20 +81,34 @@ async function submitAvailability(rawText) {
   }
 
   const member = memberSelect.value;
+  const previous = state.submissions[member] || null;
   isSubmitting = true;
   setComposerState(true);
-  setSupportText("正在解析这句话...");
+  setSupportText("正在更新这位成员的本周草稿状态...");
 
   try {
-    const parsed = await parseAvailabilitySmart(rawText);
+    const parsed = await parseAvailabilitySmart(rawText, member, previous);
     const timestamp = new Date().toLocaleString("zh-CN", { hour12: false });
     const submission = {
       rawText,
-      parsed,
+      draft: parsed.draft,
+      parsed: {
+        availableSlots: parsed.availableSlots,
+        uncertainSlots: parsed.uncertainSlots,
+        summary: parsed.summary,
+        uncertainSummary: parsed.uncertainSummary,
+        needsConfirmation: parsed.needsConfirmation,
+        clarificationQuestion: parsed.clarificationQuestion
+      },
       timestamp
     };
     const userMessage = { role: "user", member, text: rawText, timestamp };
-    const botMessage = { role: "bot", member, text: buildBotReply(member, parsed), timestamp };
+    const botMessage = {
+      role: "bot",
+      member,
+      text: buildBotReply(member, parsed),
+      timestamp
+    };
 
     state.submissions[member] = submission;
     state.messages.push(userMessage, botMessage);
@@ -171,10 +126,12 @@ async function submitAvailability(rawText) {
         botMessage
       });
       mergeIncomingState(remoteState);
-      setSupportText("已同步到共享空间，手机和电脑会看到同一份结果。");
+      setSupportText(parsed.needsConfirmation
+        ? "草稿已同步。你可以继续补一句，系统会在当前理解上做增量更新。"
+        : "草稿已同步，手机和电脑现在会看到同一份成员状态。");
     } catch (error) {
       console.warn("Remote submission sync failed:", error);
-      setSupportText("本次提交已保存在当前设备；共享同步暂时失败。");
+      setSupportText("本次提交已保存在当前设备，共享同步稍后再试。");
     }
   } catch (error) {
     setSupportText(`提交失败：${error.message || "请稍后再试"}`);
@@ -221,18 +178,17 @@ async function resetState() {
     speechRecognition.stop();
   }
 
-  const next = emptyState();
-  overwriteState(next);
-  setSupportText("当前设备里的数据已清空。");
+  overwriteState(createEmptyState());
+  setSupportText("已经清空所有成员当前状态，并开始新的一周。");
   todoStatus.textContent = "";
 
   try {
     const remoteState = await mutateRemoteState({ action: "reset" });
     mergeIncomingState(remoteState);
-    setSupportText("共享空间也已经一起清空。");
+    setSupportText("共享空间也已经切换到新的一周。");
   } catch (error) {
     console.warn("Remote reset failed:", error);
-    setSupportText("当前设备已清空，但共享空间暂时没有同步成功。");
+    setSupportText("当前设备已经开始新的一周，但共享同步暂时失败。");
   }
 }
 
@@ -251,23 +207,16 @@ async function clearCurrentMemberState() {
   state.updatedAt = Date.now();
   saveLocalState(state);
   renderAll();
-  setSupportText(`${member} 的数据已从当前设备清空。`);
+  setSupportText(`${member} 的当前草稿状态已从本机清空。`);
 
   try {
     const remoteState = await mutateRemoteState({ action: "clearMember", member });
     mergeIncomingState(remoteState);
-    setSupportText(`${member} 的数据已经从共享空间清空，不会影响其他人。`);
+    setSupportText(`${member} 的状态已从共享空间清空，不会影响其他人。`);
   } catch (error) {
     console.warn("Remote member clear failed:", error);
-    setSupportText(`${member} 的本地数据已清空，但共享同步暂时失败。`);
+    setSupportText(`${member} 的本地状态已清空，但共享同步暂时失败。`);
   }
-}
-
-function renderAll() {
-  renderChat();
-  renderSummary();
-  renderStatus();
-  renderTodos();
 }
 
 async function renderTabs(song = currentTabSong) {
@@ -332,10 +281,17 @@ function renderSongFiles(song, files) {
   `).join("");
 }
 
+function renderAll() {
+  renderChat();
+  renderSummary();
+  renderStatus();
+  renderTodos();
+}
+
 function renderChat() {
   const intro = `
     <div class="message bot">
-      你好，我是 Jamly。你像在微信群里一样直接说这周什么时候有空就行，例如：我周五晚上约了朋友吃饭，周一下午2点到4点有课，其他时候都可以。我会帮你整理成统一的时间段。
+      你好，我是 Jamly。你像在微信群里一样直接说这周什么时候有空就行，例如：我周五晚上约了朋友吃饭，周一下午2点到4点有课，其他时候都可以。我会先维护你的本周草稿状态，再帮你整理成统一的时间段；如果有“可能有事”的时间，我也会把它记成待定。
       <small>系统消息</small>
     </div>
   `;
@@ -359,9 +315,6 @@ function renderChat() {
 
 function renderSummary() {
   const completedMembers = MEMBERS.filter((member) => state.submissions[member]);
-  const common = findCommonSlots();
-  const best = findBestSlots();
-
   if (!completedMembers.length) {
     summaryContent.innerHTML = `<p class="empty-copy">还没有人提交本周时间。先发一句话试试吧。</p>`;
     return;
@@ -369,35 +322,47 @@ function renderSummary() {
 
   const blocks = [];
   if (completedMembers.length === MEMBERS.length) {
-    if (common.length) {
-      blocks.push(renderSlotCard("全员可用时间", "以下是六个人都能到的排练时间。", common));
-    } else {
-      blocks.push(`
-        <div class="slot-item">
-          <div class="slot-title">全员可用时间</div>
-          <div class="slot-meta">目前没有出现六个人同时都有空的时间段。</div>
-        </div>
-      `);
-    }
+    const definiteCommon = findCommonSlots();
+    const pendingCommon = findPendingCommonSlots();
+
+    blocks.push(renderSlotCard(
+      "全员确定可行时间",
+      definiteCommon.length
+        ? "以下时间每个人都已经明确可以。"
+        : "目前还没有出现 6 个人都明确可以的时间段。",
+      formatDefiniteLines(definiteCommon)
+    ));
+
+    blocks.push(renderSlotCard(
+      "全员可行（含待定）",
+      pendingCommon.length
+        ? "以下时间没有人明确冲突，但带有待定成员标记。"
+        : "目前还没有出现带待定标记的全员可行时间。",
+      formatPendingLines(pendingCommon)
+    ));
   } else {
     blocks.push(`
       <div class="slot-item">
-        <div class="slot-title">全员可用时间</div>
-        <div class="slot-meta">目前已收到 ${completedMembers.length}/6 位成员的提交，等全部提交后再显示真正的全员交集。</div>
+        <div class="slot-title">全员结果待生成</div>
+        <div class="slot-meta">目前已收到 ${completedMembers.length}/${MEMBERS.length} 位成员的草稿状态，等所有人都提交后会显示完整的确定结果和待定结果。</div>
       </div>
     `);
   }
 
-  if (best.length) {
-    blocks.push(renderSlotCard(`当前次优时间（${best[0].count} 人可用）`, "如果暂时凑不齐全员，可以先参考这组时间。", best.map((item) => item.slot)));
-  } else {
-    blocks.push(`
-      <div class="slot-item">
-        <div class="slot-title">当前次优时间</div>
-        <div class="slot-meta">还没有足够的数据来生成推荐时间。</div>
-      </div>
-    `);
-  }
+  const best = findBestDefiniteSlots();
+  const bestPending = findBestPendingSlots();
+
+  blocks.push(renderSlotCard(
+    best.length ? `当前次优时间（${best[0].count} 人明确可）` : "当前次优时间",
+    best.length ? "如果还没收齐所有人，可以先看当前明确可行度最高的时间。" : "还没有足够的数据生成当前明确可行时间。",
+    formatDefiniteLines(best.map((item) => item.slot))
+  ));
+
+  blocks.push(renderSlotCard(
+    bestPending.length ? `当前次优时间（含待定，${bestPending[0].count} 人非冲突）` : "当前次优时间（含待定）",
+    bestPending.length ? "这些时间没有人明确冲突，但其中包含待定成员。" : "还没有带待定标记的推荐时间。",
+    formatPendingLines(bestPending)
+  ));
 
   summaryContent.innerHTML = blocks.join("");
 }
@@ -406,15 +371,32 @@ function renderStatus() {
   statusContent.innerHTML = MEMBERS.map((member) => {
     const submission = state.submissions[member];
     const done = Boolean(submission);
-    const copy = done
-      ? escapeHtml(submission.parsed.summary || "已完成解析")
-      : "还没有提交本周时间。";
+    const waiting = submission?.parsed?.needsConfirmation;
+    const summaryParts = [];
+
+    if (!done) {
+      summaryParts.push("还没有提交本周时间。");
+    } else {
+      if (submission.parsed.summary) {
+        summaryParts.push(`确定可行：${submission.parsed.summary}`);
+      } else {
+        summaryParts.push("还没有明确的确定可行时间。");
+      }
+
+      if (submission.parsed.uncertainSummary) {
+        summaryParts.push(`待定：${submission.parsed.uncertainSummary}`);
+      }
+
+      if (submission.parsed.needsConfirmation && submission.parsed.clarificationQuestion) {
+        summaryParts.push(`待确认：${submission.parsed.clarificationQuestion}`);
+      }
+    }
 
     return `
       <div class="status-card ${done ? "done" : "pending"}">
-        <div class="pill ${done ? "done" : "pending"}">${done ? "已提交" : "未提交"}</div>
+        <div class="pill ${waiting ? "pending" : done ? "done" : "pending"}">${waiting ? "待确认" : done ? "已提交" : "未提交"}</div>
         <div class="status-name">${member}</div>
-        <div class="status-meta">${copy}</div>
+        <div class="status-meta">${escapeHtml(summaryParts.join("；"))}</div>
       </div>
     `;
   }).join("");
@@ -435,8 +417,7 @@ function renderTodos() {
   `).join("");
 }
 
-function renderSlotCard(title, subtitle, slots) {
-  const lines = formatSlotsByDay(slots);
+function renderSlotCard(title, subtitle, lines) {
   return `
     <div class="slot-item">
       <div class="slot-title">${title}</div>
@@ -446,286 +427,91 @@ function renderSlotCard(title, subtitle, slots) {
   `;
 }
 
-function formatSlotsByDay(slots) {
-  const groups = groupConsecutiveSlots(sanitizeSlots(slots));
-  const perDay = new Map();
+function formatDefiniteLines(slots) {
+  return formatSlotsByDay(slots);
+}
 
-  groups.forEach((group) => {
-    const line = `${pad(group.startHour)}:00~${pad(group.endHour)}:00`;
-    const items = perDay.get(group.day) || [];
-    items.push(line);
-    perDay.set(group.day, items);
-  });
+function formatPendingLines(items) {
+  if (!items.length) {
+    return [];
+  }
 
+  const grouped = groupPendingItems(items);
   return WEEKDAYS.map((weekday, day) => {
-    const items = perDay.get(day);
-    return items?.length ? `${weekday} ${items.join(",")}` : "";
+    const dayItems = grouped
+      .filter((item) => item.day === day)
+      .map((item) => `${formatRange(item.startHour, item.endHour - 1)}（${item.pendingMembers.join("、")}待定）`);
+    return dayItems.length ? `${weekday} ${dayItems.join("，")}` : "";
   }).filter(Boolean);
 }
 
-async function parseAvailabilitySmart(rawText) {
+async function parseAvailabilitySmart(rawText, member, previousSubmission) {
   try {
     const response = await fetch("/api/parse", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: rawText })
+      body: JSON.stringify({
+        text: rawText,
+        member,
+        currentDraft: previousSubmission?.draft || createEmptyDraft(),
+        recentMessages: state.messages.filter((message) => message.member === member).slice(-6)
+      })
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      const availableSlots = sanitizeSlots(data.availableSlots || []);
-      return {
-        availableSlots,
-        summary: buildAvailabilitySummary(availableSlots) || data.summary || "暂时没有识别到明确可用时间。"
-      };
+    if (!response.ok) {
+      throw new Error(await response.text() || "Parse failed");
     }
-  } catch (error) {
-    console.warn("Remote parse failed, fallback to local parser:", error);
-  }
 
-  return parseAvailability(rawText);
-}
-
-function parseAvailability(rawText) {
-  const text = normalizeText(rawText);
-  if (hasFullWeekAvailability(text)) {
-    const availableSlots = buildAllWeekSlots();
+    const data = await response.json();
+    const draft = normalizeDraft(data.draft || createEmptyDraft());
+    const availableSlots = sanitizeSlots(data.availableSlots || []);
+    const uncertainSlots = sanitizeSlots(data.uncertainSlots || []);
     return {
+      draft,
       availableSlots,
-      summary: buildAvailabilitySummary(availableSlots)
+      uncertainSlots,
+      summary: buildAvailabilitySummary(availableSlots) || String(data.summary || ""),
+      uncertainSummary: buildAvailabilitySummary(uncertainSlots) || String(data.uncertainSummary || ""),
+      needsConfirmation: Boolean(data.needsConfirmation),
+      clarificationQuestion: String(data.clarificationQuestion || "")
     };
+  } catch (error) {
+    console.warn("Remote parse failed, fallback to conservative local mode:", error);
+    return parseAvailabilityFallback(rawText, previousSubmission?.draft || createEmptyDraft());
   }
-
-  const clauses = buildClauses(text);
-  const hasPositiveClause = clauses.some((clause) => clause.polarity === "positive");
-  const hasNegativeClause = clauses.some((clause) => clause.polarity === "negative");
-  const assumeAllOpen = impliesBroadAvailability(text) || (hasNegativeClause && !hasPositiveClause);
-  const slots = new Set(assumeAllOpen ? buildAllWeekSlots() : []);
-
-  clauses.forEach((clause) => {
-    const targetHours = clause.hours.length ? clause.hours : OPEN_HOURS;
-    clause.days.forEach((day) => {
-      targetHours.forEach((hour) => {
-        const slot = makeSlot(day, hour);
-        if (clause.polarity === "negative") {
-          slots.delete(slot);
-        } else {
-          slots.add(slot);
-        }
-      });
-    });
-  });
-
-  const availableSlots = sanitizeSlots(Array.from(slots));
-  return {
-    availableSlots,
-    summary: buildAvailabilitySummary(availableSlots) || "暂时没有识别到明确可用时间，你可以补一句更具体的描述。"
-  };
 }
 
-function buildClauses(text) {
-  const parts = text
-    .replace(/[，。；]/g, ",")
-    .replace(/(?<!到)(?<!至)(?<!-)(?<!—)(?<!~)(?<!～)(?=(?:周|星期|礼拜)[一二三四五六日天])/g, ",")
-    .split(/,|并且|然后|而且|但是|其他时候都可以|其他都可以|其余都可以|剩下都可以|除此之外都可以|别的时候都可以|别的时间都可以|其余时间都可以/g)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts
-    .map((part) => {
-      const days = extractDays(part);
-      if (!days.length) {
-        return null;
-      }
-      const hours = extractHours(part);
-      return {
-        days,
-        hours,
-        polarity: getClausePolarity(part)
-      };
-    })
-    .filter(Boolean);
-}
-
-function extractDays(part) {
-  const found = new Set();
-  const rangePart = part.replace(/\s+/g, "");
-
-  for (const match of rangePart.matchAll(RANGE_PATTERN)) {
-    const start = DAY_CHAR_INDEX[match[1]];
-    const end = DAY_CHAR_INDEX[match[2]];
-    if (Number.isInteger(start) && Number.isInteger(end)) {
-      const stepDays = expandDayRange(start, end);
-      stepDays.forEach((day) => found.add(day));
-    }
-  }
-
-  Object.entries(dayAliases).forEach(([label, index]) => {
-    if (rangePart.includes(label)) {
-      found.add(index);
-    }
-  });
-
-  if (/工作日/.test(rangePart)) {
-    [0, 1, 2, 3, 4].forEach((day) => found.add(day));
-  }
-
-  if (/周末/.test(rangePart)) {
-    [5, 6].forEach((day) => found.add(day));
-  }
-
-  return Array.from(found).sort((a, b) => a - b);
-}
-
-function extractHours(part) {
-  const hasExplicitRange = /(\d{1,2})点\s*(?:到|至|\-|~|～)\s*(\d{1,2})点/g.test(part);
-  const hasAfterPattern = /(\d{1,2})点(?:以后|之后|后)/g.test(part);
-  const hours = new Set();
-
-  if (!hasExplicitRange && !hasAfterPattern) {
-    timeWords.forEach(({ regex, hours: mapped }) => {
-      if (regex.test(part)) {
-        mapped.forEach((hour) => hours.add(hour));
-      }
-      regex.lastIndex = 0;
-    });
-  }
-
-  for (const match of part.matchAll(/(\d{1,2})点(?:以后|之后|后)/g)) {
-    const start = normalizeHourInClause(part, Number(match[1]));
-    OPEN_HOURS.filter((hour) => hour >= start).forEach((hour) => hours.add(hour));
-  }
-
-  for (const match of part.matchAll(/(\d{1,2})点\s*(?:到|至|\-|~|～)\s*(\d{1,2})点/g)) {
-    const start = normalizeHourInClause(part, Number(match[1]));
-    const end = normalizeHourInClause(part, Number(match[2]), { startHour: start });
-    for (let hour = start; hour < end; hour += 1) {
-      if (hour >= 10 && hour <= 22) {
-        hours.add(hour);
-      }
-    }
-  }
-
-  const exactMatches = Array.from(part.matchAll(/(\d{1,2})点/g), (match) =>
-    normalizeHourInClause(part, Number(match[1]))
-  );
-  if (exactMatches.length === 1 && hours.size === 0) {
-    const exact = exactMatches[0];
-    if (exact >= 10 && exact <= 22) {
-      hours.add(exact);
-      if (exact + 1 <= 22) {
-        hours.add(exact + 1);
-      }
-    }
-  }
-
-  return Array.from(hours)
-    .filter((hour) => hour >= 10 && hour <= 22)
-    .sort((a, b) => a - b);
-}
-
-function getClausePolarity(part) {
-  const hasNegative = NEGATIVE_PATTERN.test(part);
-  const hasPositive = POSITIVE_PATTERN.test(part);
-
-  if (hasNegative && !hasPositive) {
-    return "negative";
-  }
-  if (hasNegative && hasPositive) {
-    return /其他|其余|剩下|除此之外/.test(part) ? "positive" : "negative";
-  }
-  return "positive";
-}
-
-function chooseParsedResult(rawText, localParsed, remoteParsed) {
-  if (!remoteParsed.availableSlots.length && localParsed.availableSlots.length) {
-    return localParsed;
-  }
-
-  if (shouldPreferLocal(rawText, localParsed, remoteParsed)) {
-    return localParsed;
-  }
-
-  return remoteParsed.availableSlots.length ? remoteParsed : localParsed;
-}
-
-function shouldPreferLocal(rawText, localParsed, remoteParsed) {
-  if (!localParsed.availableSlots.length) {
-    return false;
-  }
-
+function parseAvailabilityFallback(rawText, currentDraft) {
   const text = normalizeText(rawText);
-  if (impliesBroadAvailability(text)) {
-    return true;
+  const draft = normalizeDraft(currentDraft);
+
+  if (/(这周都可以|这周所有时间都可以|整周都可以|我这周都可以)/.test(text)) {
+    draft.mode = "whole_week_with_exceptions";
+    draft.available = createEmptyDayMap();
+    draft.unavailable = createEmptyDayMap();
+    draft.uncertain = createEmptyDayMap();
+    draft.normalizedText = rawText;
+    draft.lastIntent = "overwrite";
+    draft.needsConfirmation = false;
+    draft.clarificationQuestion = "";
+  } else {
+    draft.normalizedText = rawText;
+    draft.lastIntent = "patch";
+    draft.needsConfirmation = true;
+    draft.clarificationQuestion = "我先收到了这句话，但为了避免理解错，你可以补一句“没说的其他时间都可以”或者直接再说一次完整时间。";
   }
 
-  if (NEGATIVE_PATTERN.test(text) && !POSITIVE_PATTERN.test(text)) {
-    return true;
-  }
-
-  if (RANGE_PATTERN.test(text)) {
-    RANGE_PATTERN.lastIndex = 0;
-    return true;
-  }
-
-  RANGE_PATTERN.lastIndex = 0;
-  return remoteParsed.availableSlots.length < localParsed.availableSlots.length / 2;
-}
-
-function normalizeHour(hour) {
-  if (hour >= 0 && hour <= 7) {
-    return hour + 12;
-  }
-  return hour;
-}
-
-function normalizeHourInClause(part, hour, options = {}) {
-  let normalized = Number(hour);
-  if (!Number.isInteger(normalized)) {
-    return normalized;
-  }
-
-  const hasMorning = /(早上|上午|早晨|清晨)/.test(part);
-  const hasNoon = /(中午)/.test(part);
-  const hasAfternoon = /(下午|午后|傍晚)/.test(part);
-  const hasEvening = /(晚上|晚间|夜里|夜间)/.test(part);
-
-  if (hasEvening || hasAfternoon) {
-    if (normalized >= 1 && normalized <= 11) {
-      normalized += 12;
-    }
-  } else if (hasNoon) {
-    if (normalized >= 1 && normalized <= 2) {
-      normalized += 12;
-    }
-  } else if (!hasMorning) {
-    normalized = normalizeHour(normalized);
-  }
-
-  if (Number.isInteger(options.startHour) && normalized <= options.startHour) {
-    if ((hasEvening || hasAfternoon || hasNoon) && normalized <= 11) {
-      normalized += 12;
-    }
-  }
-
-  return normalized;
-}
-
-function hasFullWeekAvailability(text) {
-  return /(这周都可以|这周都行|整周都可以|整周都行|我这周都可以|我这周都有空|这周所有时间都可以|这周全部时间都可以|这周都有空)/.test(text);
-}
-
-function impliesBroadAvailability(text) {
-  return hasFullWeekAvailability(text)
-    || DEFAULT_ALL_PATTERN.test(text)
-    || /除了.+(?:都|也|基本)?(?:是)?可以/.test(text)
-    || /其他时候.+可以/.test(text);
-}
-
-function expandDayRange(start, end) {
-  if (start <= end) {
-    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
-  }
-  return [start, end];
+  const availableSlots = computeAvailableSlotsFromDraft(draft);
+  const uncertainSlots = dayMapToSlots(draft.uncertain);
+  return {
+    draft,
+    availableSlots,
+    uncertainSlots,
+    summary: buildAvailabilitySummary(availableSlots),
+    uncertainSummary: buildAvailabilitySummary(uncertainSlots),
+    needsConfirmation: draft.needsConfirmation,
+    clarificationQuestion: draft.clarificationQuestion
+  };
 }
 
 function findCommonSlots() {
@@ -734,15 +520,44 @@ function findCommonSlots() {
     return [];
   }
 
-  const submitted = completed.map((member) => state.submissions[member].parsed.availableSlots || []);
-  return sanitizeSlots(submitted.reduce((acc, slots) => acc.filter((slot) => slots.includes(slot))));
+  const first = state.submissions[completed[0]].parsed.availableSlots || [];
+  return sanitizeSlots(first.filter((slot) => completed.every((member) => state.submissions[member].parsed.availableSlots.includes(slot))));
 }
 
-function findBestSlots() {
+function findPendingCommonSlots() {
+  const completed = MEMBERS.filter((member) => state.submissions[member]);
+  if (completed.length !== MEMBERS.length) {
+    return [];
+  }
+
+  const allSlots = buildAllWeekSlots();
+  return allSlots.reduce((acc, slot) => {
+    const pendingMembers = [];
+    let blocked = false;
+
+    completed.forEach((member) => {
+      const submission = state.submissions[member];
+      const available = submission.parsed.availableSlots.includes(slot);
+      const uncertain = submission.parsed.uncertainSlots.includes(slot);
+      if (!available && !uncertain) {
+        blocked = true;
+      } else if (uncertain) {
+        pendingMembers.push(member);
+      }
+    });
+
+    if (!blocked && pendingMembers.length) {
+      acc.push({ slot, pendingMembers });
+    }
+    return acc;
+  }, []);
+}
+
+function findBestDefiniteSlots() {
   const counter = new Map();
 
   MEMBERS.forEach((member) => {
-    const slots = sanitizeSlots(state.submissions[member]?.parsed.availableSlots || []);
+    const slots = sanitizeSlots(state.submissions[member]?.parsed?.availableSlots || []);
     slots.forEach((slot) => {
       counter.set(slot, (counter.get(slot) || 0) + 1);
     });
@@ -759,12 +574,72 @@ function findBestSlots() {
     .map(([slot, count]) => ({ slot, count }));
 }
 
-function buildBotReply(member, parsed) {
-  if (!parsed.availableSlots.length) {
-    return `${member}，我先收到了你的表达，但这次还没完全听懂具体时间。你可以补一句更具体的，比如“周三晚上可以”。`;
+function findBestPendingSlots() {
+  const scoreMap = new Map();
+  const detailMap = new Map();
+
+  buildAllWeekSlots().forEach((slot) => {
+    let score = 0;
+    let blocked = false;
+    const pendingMembers = [];
+
+    MEMBERS.forEach((member) => {
+      const submission = state.submissions[member];
+      if (!submission) {
+        return;
+      }
+      if (submission.parsed.availableSlots.includes(slot)) {
+        score += 1;
+        return;
+      }
+      if (submission.parsed.uncertainSlots.includes(slot)) {
+        score += 1;
+        pendingMembers.push(member);
+        return;
+      }
+      blocked = true;
+    });
+
+    if (!blocked && pendingMembers.length) {
+      scoreMap.set(slot, score);
+      detailMap.set(slot, pendingMembers);
+    }
+  });
+
+  if (!scoreMap.size) {
+    return [];
   }
 
-  return `${member}，已记录。当前我理解到的可用时间是：${parsed.summary}。如果不对，你可以直接再发一句覆盖这次提交。`;
+  const bestCount = Math.max(...scoreMap.values());
+  return Array.from(scoreMap.entries())
+    .filter(([, count]) => count === bestCount)
+    .sort((a, b) => a[0].localeCompare(b[0], "zh-CN"))
+    .map(([slot, count]) => ({
+      slot,
+      count,
+      pendingMembers: detailMap.get(slot) || []
+    }));
+}
+
+function buildBotReply(member, parsed) {
+  const chunks = [];
+
+  if (parsed.summary) {
+    chunks.push(`当前我理解的确定可行时间是：${parsed.summary}`);
+  } else {
+    chunks.push("我先记下了这句话，但现在还没有足够明确的确定可行时间。");
+  }
+
+  if (parsed.uncertainSummary) {
+    chunks.push(`待定时间是：${parsed.uncertainSummary}`);
+  }
+
+  if (parsed.needsConfirmation && parsed.clarificationQuestion) {
+    chunks.push(`还差一个确认：${parsed.clarificationQuestion}`);
+    return `${member}，已暂存。${chunks.join("。")}。`;
+  }
+
+  return `${member}，已更新。${chunks.join("。")}。如果不对，你可以继续补一句，我会在当前草稿上继续改。`;
 }
 
 function buildAvailabilitySummary(slots) {
@@ -772,23 +647,50 @@ function buildAvailabilitySummary(slots) {
   return lines.join("；");
 }
 
-function buildAllWeekSlots() {
-  const slots = [];
-  for (let day = 0; day < 7; day += 1) {
-    OPEN_HOURS.forEach((hour) => slots.push(makeSlot(day, hour)));
-  }
-  return slots;
+function formatSlotsByDay(slots) {
+  const groups = groupConsecutiveSlots(sanitizeSlots(slots));
+  const perDay = new Map();
+
+  groups.forEach((group) => {
+    const line = formatRange(group.startHour, group.endHour - 1);
+    const items = perDay.get(group.day) || [];
+    items.push(line);
+    perDay.set(group.day, items);
+  });
+
+  return WEEKDAYS.map((weekday, day) => {
+    const items = perDay.get(day);
+    return items?.length ? `${weekday} ${items.join(",")}` : "";
+  }).filter(Boolean);
 }
 
-function sanitizeSlots(slots) {
-  return Array.from(new Set((slots || []).filter((slot) => {
-    const parsed = splitSlot(slot);
-    return Number.isInteger(parsed.day) && Number.isInteger(parsed.hour) && parsed.day >= 0 && parsed.day <= 6 && parsed.hour >= 10 && parsed.hour <= 22;
-  }))).sort((a, b) => {
-    const left = splitSlot(a);
-    const right = splitSlot(b);
-    return (left.day - right.day) || (left.hour - right.hour);
+function groupPendingItems(items) {
+  if (!items.length) {
+    return [];
+  }
+
+  const sorted = [...items].sort((left, right) => left.slot.localeCompare(right.slot, "zh-CN"));
+  const groups = [];
+
+  sorted.forEach((item) => {
+    const { day, hour } = splitSlot(item.slot);
+    const signature = item.pendingMembers.slice().sort().join("|");
+    const current = groups[groups.length - 1];
+
+    if (current && current.day === day && current.endHour === hour && current.signature === signature) {
+      current.endHour += 1;
+    } else {
+      groups.push({
+        day,
+        startHour: hour,
+        endHour: hour + 1,
+        pendingMembers: item.pendingMembers.slice().sort(),
+        signature
+      });
+    }
   });
+
+  return groups;
 }
 
 function groupConsecutiveSlots(slots) {
@@ -796,7 +698,7 @@ function groupConsecutiveSlots(slots) {
     return [];
   }
 
-  const parsed = slots.map(splitSlot).sort((a, b) => (a.day - b.day) || (a.hour - b.hour));
+  const parsed = slots.map(splitSlot).sort((left, right) => (left.day - right.day) || (left.hour - right.hour));
   const groups = [];
   let current = {
     day: parsed[0].day,
@@ -843,7 +745,7 @@ function setupVoiceRecognition() {
 
     if (transcript) {
       messageInput.value = transcript;
-      setSupportText("正在持续识别，你可以停下来想一会，点按钮时才会结束。结束后请自己确认并点发送。");
+      setSupportText("正在持续识别，你可以停下来想一会儿，只有你自己点“结束录音”才会结束。");
     }
   };
 
@@ -855,16 +757,7 @@ function setupVoiceRecognition() {
     setSupportText("语音识别失败了，你可以再试一次，或者直接手动输入文字。");
   };
 
-  speechRecognition.onend = async () => {
-    if (isRecording && !voiceStopRequested && !isSubmitting) {
-      try {
-        speechRecognition.start();
-        setSupportText("我还在继续听，结束时再点一次按钮。");
-        return;
-      } catch (error) {
-        // fall through to reset UI below
-      }
-    }
+  speechRecognition.onend = () => {
     const endedByUser = voiceStopRequested;
     isRecording = false;
     voiceStopRequested = false;
@@ -877,21 +770,23 @@ function setupVoiceRecognition() {
     }
 
     if (endedByUser) {
-      setSupportText("语音已结束，文字已经保留。确认无误后再点发送。");
+      setSupportText("录音已结束，文字已经保留。确认无误后再点发送。");
       return;
     }
 
-    setSupportText("语音暂时停下来了，我没有帮你自动发送。你可以继续点开始说话，或者直接点发送。");
+    setSupportText("浏览器把这段录音停掉了，但我没有自动提交。你可以继续点开始说话，或者直接点发送。");
   };
 
   voiceButton.addEventListener("click", () => {
     if (isSubmitting) {
       return;
     }
+
     if (isRecording) {
       stopVoiceRecognition();
       return;
     }
+
     startVoiceRecognition();
   });
 }
@@ -907,7 +802,7 @@ function startVoiceRecognition() {
     messageInput.value = "";
     voiceButton.classList.add("recording");
     voiceButton.textContent = "点击结束录音";
-    setSupportText("正在持续识别，你可以停顿思考，想结束时再点一次按钮。");
+    setSupportText("正在持续识别，你可以停顿思考；结束时再点一次按钮。");
     speechRecognition.start();
   } catch (error) {
     isRecording = false;
@@ -923,7 +818,7 @@ function stopVoiceRecognition() {
     return;
   }
   voiceStopRequested = true;
-  setSupportText("已结束语音，正在整理文字，请稍等...");
+  setSupportText("已结束录音，正在整理文字...");
   speechRecognition.stop();
 }
 
@@ -1018,6 +913,7 @@ function mergeIncomingState(nextState) {
 
 function overwriteState(nextState) {
   const normalized = normalizeState(nextState);
+  state.weekKey = normalized.weekKey;
   state.messages = normalized.messages;
   state.submissions = normalized.submissions;
   state.todos = normalized.todos;
@@ -1026,62 +922,200 @@ function overwriteState(nextState) {
   renderAll();
 }
 
-function normalizeState(raw) {
-  const base = emptyState();
-  const next = { ...base, ...(raw || {}) };
+function createEmptyDayMap() {
+  return {
+    "0": [],
+    "1": [],
+    "2": [],
+    "3": [],
+    "4": [],
+    "5": [],
+    "6": []
+  };
+}
 
-  next.messages = Array.isArray(next.messages)
-    ? next.messages.filter(Boolean).map((message) => ({
-      role: message.role === "bot" ? "bot" : "user",
-      member: MEMBERS.includes(message.member) ? message.member : MEMBERS[0],
-      text: String(message.text || ""),
-      timestamp: String(message.timestamp || "")
-    }))
-    : [];
+function sanitizeHours(hours) {
+  return Array.from(new Set((hours || []).filter((hour) => Number.isInteger(hour) && hour >= 10 && hour <= 22))).sort((a, b) => a - b);
+}
 
-  next.submissions = MEMBERS.reduce((acc, member) => {
-    const submission = next.submissions?.[member];
-    if (!submission) {
-      return acc;
-    }
-
-    const availableSlots = sanitizeSlots(submission.parsed?.availableSlots || []);
-    acc[member] = {
-      rawText: String(submission.rawText || ""),
-      parsed: {
-        availableSlots,
-        summary: buildAvailabilitySummary(availableSlots) || String(submission.parsed?.summary || "暂时没有识别到明确可用时间。")
-      },
-      timestamp: String(submission.timestamp || "")
-    };
-    return acc;
-  }, {});
-
-  next.todos = Array.isArray(next.todos)
-    ? next.todos
-      .filter(Boolean)
-      .map((item) => ({
-        id: String(item.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
-        time: String(item.time || ""),
-        text: String(item.text || "")
-      }))
-      .filter((item) => item.time && item.text)
-    : [];
-
-  next.updatedAt = Number(next.updatedAt || 0);
+function normalizeDayMap(dayMap) {
+  const next = createEmptyDayMap();
+  Object.keys(next).forEach((day) => {
+    next[day] = sanitizeHours(dayMap?.[day]);
+  });
   return next;
+}
+
+function createEmptyDraft() {
+  return {
+    mode: "unknown",
+    normalizedText: "",
+    available: createEmptyDayMap(),
+    unavailable: createEmptyDayMap(),
+    uncertain: createEmptyDayMap(),
+    lastIntent: "overwrite",
+    needsConfirmation: false,
+    clarificationQuestion: ""
+  };
+}
+
+function createWeekKey(date = new Date()) {
+  const current = new Date(date);
+  const weekday = current.getDay();
+  const diff = weekday === 0 ? -6 : 1 - weekday;
+  current.setHours(0, 0, 0, 0);
+  current.setDate(current.getDate() + diff);
+  return current.toISOString().slice(0, 10);
+}
+
+function createEmptyState() {
+  return {
+    weekKey: createWeekKey(),
+    messages: [],
+    submissions: {},
+    todos: [],
+    updatedAt: 0
+  };
+}
+
+function normalizeDraft(raw) {
+  const base = createEmptyDraft();
+  return {
+    mode: ["unknown", "whole_week_with_exceptions", "explicit_slots_only"].includes(raw?.mode) ? raw.mode : base.mode,
+    normalizedText: String(raw?.normalizedText || raw?.normalized_text || ""),
+    available: normalizeDayMap(raw?.available),
+    unavailable: normalizeDayMap(raw?.unavailable),
+    uncertain: normalizeDayMap(raw?.uncertain),
+    lastIntent: ["overwrite", "patch", "confirm", "clarify"].includes(raw?.lastIntent || raw?.intent)
+      ? (raw.lastIntent || raw.intent)
+      : base.lastIntent,
+    needsConfirmation: Boolean(raw?.needsConfirmation ?? raw?.needs_confirmation),
+    clarificationQuestion: String(raw?.clarificationQuestion || raw?.clarification_question || "")
+  };
+}
+
+function normalizeSubmission(raw) {
+  if (!raw) {
+    return null;
+  }
+
+  const availableSlots = sanitizeSlots(raw?.parsed?.availableSlots || []);
+  const uncertainSlots = sanitizeSlots(raw?.parsed?.uncertainSlots || []);
+
+  return {
+    rawText: String(raw.rawText || ""),
+    timestamp: String(raw.timestamp || ""),
+    draft: normalizeDraft(raw.draft),
+    parsed: {
+      availableSlots,
+      uncertainSlots,
+      summary: String(raw?.parsed?.summary || buildAvailabilitySummary(availableSlots)),
+      uncertainSummary: String(raw?.parsed?.uncertainSummary || buildAvailabilitySummary(uncertainSlots)),
+      needsConfirmation: Boolean(raw?.parsed?.needsConfirmation),
+      clarificationQuestion: String(raw?.parsed?.clarificationQuestion || "")
+    }
+  };
+}
+
+function normalizeState(raw) {
+  const base = createEmptyState();
+  return {
+    weekKey: String(raw?.weekKey || base.weekKey),
+    messages: Array.isArray(raw?.messages)
+      ? raw.messages.filter(Boolean).map((message) => ({
+        role: message?.role === "bot" ? "bot" : "user",
+        member: MEMBERS.includes(message?.member) ? message.member : MEMBERS[0],
+        text: String(message?.text || ""),
+        timestamp: String(message?.timestamp || "")
+      }))
+      : [],
+    submissions: MEMBERS.reduce((acc, member) => {
+      const submission = normalizeSubmission(raw?.submissions?.[member]);
+      if (submission) {
+        acc[member] = submission;
+      }
+      return acc;
+    }, {}),
+    todos: Array.isArray(raw?.todos)
+      ? raw.todos
+        .filter(Boolean)
+        .map((item) => ({
+          id: String(item?.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+          time: String(item?.time || ""),
+          text: String(item?.text || "")
+        }))
+        .filter((item) => item.time && item.text)
+      : [],
+    updatedAt: Number(raw?.updatedAt || 0)
+  };
 }
 
 function hasMeaningfulData(targetState) {
   return Boolean(targetState.messages.length || Object.keys(targetState.submissions).length || targetState.todos.length);
 }
 
+function computeAvailableSlotsFromDraft(draft) {
+  const available = new Set();
+  const unavailable = new Set(dayMapToSlots(draft.unavailable));
+  const uncertain = new Set(dayMapToSlots(draft.uncertain));
+
+  if (draft.mode === "whole_week_with_exceptions") {
+    for (let day = 0; day < 7; day += 1) {
+      OPEN_HOURS.forEach((hour) => {
+        const slot = makeSlot(day, hour);
+        if (!unavailable.has(slot) && !uncertain.has(slot)) {
+          available.add(slot);
+        }
+      });
+    }
+  } else {
+    dayMapToSlots(draft.available).forEach((slot) => {
+      if (!unavailable.has(slot) && !uncertain.has(slot)) {
+        available.add(slot);
+      }
+    });
+  }
+
+  return sanitizeSlots(Array.from(available));
+}
+
+function buildAllWeekSlots() {
+  const slots = [];
+  for (let day = 0; day < 7; day += 1) {
+    OPEN_HOURS.forEach((hour) => {
+      slots.push(makeSlot(day, hour));
+    });
+  }
+  return slots;
+}
+
+function sanitizeSlots(slots) {
+  return Array.from(new Set((slots || []).filter((slot) => {
+    const parsed = splitSlot(slot);
+    return Number.isInteger(parsed.day) && Number.isInteger(parsed.hour) && parsed.day >= 0 && parsed.day <= 6 && parsed.hour >= 10 && parsed.hour <= 22;
+  }))).sort((a, b) => {
+    const left = splitSlot(a);
+    const right = splitSlot(b);
+    return (left.day - right.day) || (left.hour - right.hour);
+  });
+}
+
+function dayMapToSlots(dayMap) {
+  const slots = [];
+  Object.keys(createEmptyDayMap()).forEach((day) => {
+    sanitizeHours(dayMap?.[day]).forEach((hour) => {
+      slots.push(`${day}-${hour}`);
+    });
+  });
+  return sanitizeSlots(slots);
+}
+
 function loadLocalState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : emptyState();
+    return raw ? JSON.parse(raw) : createEmptyState();
   } catch (error) {
-    return emptyState();
+    return createEmptyState();
   }
 }
 
@@ -1098,14 +1132,16 @@ function splitSlot(slot) {
   return { day, hour };
 }
 
+function formatRange(start, end) {
+  return `${pad(start)}:00~${pad(end + 1)}:00`;
+}
+
 function pad(value) {
   return String(value).padStart(2, "0");
 }
 
 function normalizeText(text) {
-  return String(text)
-    .replace(/\s+/g, "")
-    .replace(/OK|ok|Ok/g, "可以");
+  return String(text).replace(/\s+/g, "").replace(/OK|ok|Ok/g, "可以");
 }
 
 function escapeHtml(text) {

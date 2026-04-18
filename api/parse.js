@@ -1,3 +1,6 @@
+const DAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"];
+const OPEN_HOURS = Array.from({ length: 13 }, (_, index) => index + 10);
+
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.status(405).send("Method Not Allowed");
@@ -6,7 +9,7 @@ module.exports = async function handler(req, res) {
 
   const baseUrl = (process.env.AI_BASE_URL || "").replace(/\/+$/, "");
   const apiKey = process.env.AI_API_KEY || "";
-  const model = "gpt-5.4";
+  const model = process.env.AI_MODEL || "gpt-5.4";
 
   if (!baseUrl || !apiKey) {
     res.status(500).send("Missing AI_BASE_URL or AI_API_KEY");
@@ -19,144 +22,107 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  const currentDraft = normalizeDraft(req.body?.currentDraft || createEmptyDraft());
+  const recentMessages = Array.isArray(req.body?.recentMessages)
+    ? req.body.recentMessages.slice(-6).map((item) => ({
+      role: item?.role === "bot" ? "bot" : "user",
+      text: String(item?.text || "")
+    }))
+    : [];
+
   const schema = {
-    name: "availability_parse",
+    name: "jamly_stateful_parse",
     schema: {
       type: "object",
       additionalProperties: false,
       properties: {
+        intent: {
+          type: "string",
+          enum: ["overwrite", "patch", "confirm", "clarify"]
+        },
         normalized_text: {
           type: "string"
         },
-        base_mode: {
+        mode: {
           type: "string",
-          enum: ["full_week", "mentioned_only"]
+          enum: ["unknown", "whole_week_with_exceptions", "explicit_slots_only"]
         },
-        availability: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            "0": {
-              type: "array",
-              items: {
-                type: "integer",
-                minimum: 10,
-                maximum: 22
-              }
-            },
-            "1": {
-              type: "array",
-              items: {
-                type: "integer",
-                minimum: 10,
-                maximum: 22
-              }
-            },
-            "2": {
-              type: "array",
-              items: {
-                type: "integer",
-                minimum: 10,
-                maximum: 22
-              }
-            },
-            "3": {
-              type: "array",
-              items: {
-                type: "integer",
-                minimum: 10,
-                maximum: 22
-              }
-            },
-            "4": {
-              type: "array",
-              items: {
-                type: "integer",
-                minimum: 10,
-                maximum: 22
-              }
-            },
-            "5": {
-              type: "array",
-              items: {
-                type: "integer",
-                minimum: 10,
-                maximum: 22
-              }
-            },
-            "6": {
-              type: "array",
-              items: {
-                type: "integer",
-                minimum: 10,
-                maximum: 22
-              }
-            }
-          },
-          required: ["0", "1", "2", "3", "4", "5", "6"]
+        available: buildDayMapSchema(),
+        unavailable: buildDayMapSchema(),
+        uncertain: buildDayMapSchema(),
+        needs_confirmation: {
+          type: "boolean"
+        },
+        clarification_question: {
+          type: "string"
         }
       },
-      required: ["normalized_text", "base_mode", "availability"]
+      required: [
+        "intent",
+        "normalized_text",
+        "mode",
+        "available",
+        "unavailable",
+        "uncertain",
+        "needs_confirmation",
+        "clarification_question"
+      ]
     },
     strict: true
   };
 
   const systemPrompt = `
-你是一个中文乐队排练时间解析器。
-你的任务不是随便猜，而是先理解句意，再输出最终可用时间。
+You are Jamly's Chinese band rehearsal availability parser.
+Your job is to update ONE member's weekly draft state, not to parse a message in isolation.
 
-## 目标
-把用户一句非常口语、非常随意、甚至可能带语音转写错误的话，解析成：
-1. normalized_text：你理解后的标准中文表达
-2. base_mode：
-   - "full_week"：用户表达的是“默认整周都可以，只排除少数不行时间”
-   - "mentioned_only"：用户只明确说了某些可用时间，没有表达“其他时间也可以”
-3. availability：最终可用小时块，Monday="0" 到 Sunday="6"
+The rehearsal room only accepts hours 10:00-23:00. Output hours 10-22 as one-hour slot starts.
 
-## 硬规则
-- 排练房开放时间只有每天 10:00-23:00，所以只允许输出 10-22 这些起始小时。
-- “一个具体的不行时间段”只能排除那一段，绝不能因此排除一整天。
-- 如果用户说“其他时间都可以 / 其他时候都可以 / 其余时间OK / 除了X都可以”，base_mode 必须是 "full_week"。
-- 如果用户提到活动、约会、上课、加班、吃饭、有事、开会、看医生、健身、攀岩等，默认它代表那个时间段“不可以”。
-- 如果一句话同时有“整体都可以”和“局部不行”，你必须先建立整周可用，再减去这些局部不行。
+You will receive:
+1. current_draft: the member's current weekly draft state
+2. recent_messages: recent conversation snippets for this member
+3. new_message: the latest user message
 
-## 中文时间语义
-- “下午2点到5点” = 14,15,16 不可用
-- “晚上7点到10点” = 19,20,21 不可用
-- “早上10点到12点” = 10,11 不可用
-- “中午12点到2点” = 12,13
-- “晚上8点后” = 20,21,22
-- “周五晚上” 默认指 18,19,20,21,22
-- “周末” = 周六和周日
-- “周一到周五” = 每一天分别处理，不能混成一个整体时间块
+Return the FULL NEXT DRAFT after applying the new message to the current draft.
 
-## 处理顺序
-1. 先把口语恢复成正常句意，写入 normalized_text。
-2. 判断 base_mode。
-3. 把每个子句拆开，分别识别日期、时间范围、可用/不可用。
-4. 先建立 base，再逐条加减时间块。
-5. 最后做一次自检：
-   - 有没有把局部不行误扩成整天不行？
-   - 有没有把“不行”误当成“可以”？
-   - 有没有把“周X到周Y”错误混到别的天？
+State semantics:
+- mode = "whole_week_with_exceptions":
+  default assumption is the member is available for the whole week, then remove unavailable blocks and mark uncertain blocks separately.
+- mode = "explicit_slots_only":
+  only the hours listed in available are definitely available.
+- mode = "unknown":
+  you still cannot safely infer the member's full default rule.
 
-## 关键例子
-- “周一下午2点到5点有课，其他时间都可以”
-  => full_week；只排除周一 14,15,16
-- “周二晚上7点到10点有课，其他时间都可以”
-  => full_week；只排除周二 19,20,21
-- “周五晚上约了朋友吃饭，其他时间都可以”
-  => full_week；只排除周五 18,19,20,21,22
-- “周六下午2点到4点不行，其他时间都可以”
-  => full_week；只排除周六 14,15
-- “周一下午2点到4点有课周二晚上7点到10点有课周三早上10点到12点有课然后其他时间都是可以的”
-  => full_week；三段局部排除分别作用在三天上
+Important behavior:
+- Distinguish intent:
+  - overwrite: the user restated the schedule from scratch
+  - patch: the user is supplementing or correcting the existing draft
+  - confirm: the user confirms the previous understanding
+  - clarify: the user answers a narrow clarification question
+- Phrases like "其他时间都可以", "没说的时间都可以", "除此之外都可以", "别的时候都行" usually mean mode should become "whole_week_with_exceptions".
+- Mentions of events or commitments (上课, 开会, 看live, 吃饭, 有事, 小组会, 大组会, 排练, 医生, 加班, 约了朋友) mean that period is NOT available unless the user explicitly says otherwise.
+- Words like "可能", "看情况", "大概", "也许", "不确定", "随时可能" should usually become UNCERTAIN, not definitely unavailable.
+- "周五晚上" defaults to hours 18-22.
+- "下午2点到4点" means 14 and 15. "晚上7点到10点" means 19, 20, 21.
+- Never expand a local exclusion into a whole day.
+- Never drop previously known constraints when the user is clearly patching the existing draft.
+- If the user says "我没说的其他时间都可以", preserve earlier exceptions from current_draft and only update the default assumption.
+- If the user is correcting a previous misunderstanding ("不是，我说的是..."), update only the corrected parts and preserve unrelated previously known parts.
 
-## 输出要求
-- 只返回 JSON，不要解释，不要 markdown。
-- availability 必须是最终可用时间，不是不可用时间。
-- 如果句子有少量口误或语音转写错误，按最合理的日常表达理解，但不要发散猜测。
+Clarification policy:
+- Do NOT say "I didn't understand" if most of the message is understandable.
+- If only one key thing is missing, preserve everything else and ask one narrow clarification question.
+- Set needs_confirmation=true only when there is a real unresolved ambiguity.
+
+Output requirements:
+- Return only JSON matching the schema.
+- available/unavailable/uncertain must represent the FULL NEXT DRAFT after applying the new message.
 `.trim();
+
+  const userPayload = JSON.stringify({
+    current_draft: currentDraft,
+    recent_messages: recentMessages,
+    new_message: text
+  });
 
   try {
     const response = await fetch(`${baseUrl}/responses`, {
@@ -174,7 +140,7 @@ module.exports = async function handler(req, res) {
           },
           {
             role: "user",
-            content: [{ type: "input_text", text }]
+            content: [{ type: "input_text", text: userPayload }]
           }
         ],
         text: {
@@ -195,18 +161,55 @@ module.exports = async function handler(req, res) {
     const data = await response.json();
     const content = extractResponseText(data);
     const parsed = JSON.parse(content);
-    const availableSlots = dayMapToSlots(parsed.availability);
+    const draft = normalizeDraft({
+      mode: parsed.mode,
+      normalizedText: parsed.normalized_text,
+      available: parsed.available,
+      unavailable: parsed.unavailable,
+      uncertain: parsed.uncertain,
+      lastIntent: parsed.intent,
+      needsConfirmation: Boolean(parsed.needs_confirmation),
+      clarificationQuestion: String(parsed.clarification_question || "")
+    });
+
+    const availableSlots = computeAvailableSlots(draft);
+    const uncertainSlots = dayMapToSlots(draft.uncertain);
 
     res.status(200).json({
-      normalizedText: parsed.normalized_text,
-      baseMode: parsed.base_mode,
+      intent: draft.lastIntent,
+      draft,
+      availableSlots,
+      uncertainSlots,
       summary: buildSummaryFromSlots(availableSlots),
-      availableSlots
+      uncertainSummary: buildSummaryFromSlots(uncertainSlots),
+      needsConfirmation: draft.needsConfirmation,
+      clarificationQuestion: draft.clarificationQuestion
     });
   } catch (error) {
     res.status(500).send(error.message || "AI parse failed");
   }
 };
+
+function buildDayMapSchema() {
+  const properties = {};
+  DAY_KEYS.forEach((day) => {
+    properties[day] = {
+      type: "array",
+      items: {
+        type: "integer",
+        minimum: 10,
+        maximum: 22
+      }
+    };
+  });
+
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties,
+    required: DAY_KEYS
+  };
+}
 
 function extractResponseText(data) {
   if (typeof data.output_text === "string" && data.output_text.trim()) {
@@ -229,35 +232,105 @@ function extractResponseText(data) {
   return chunks.join("\n").trim();
 }
 
+function createEmptyDayMap() {
+  return DAY_KEYS.reduce((acc, day) => {
+    acc[day] = [];
+    return acc;
+  }, {});
+}
+
+function sanitizeHours(hours) {
+  return Array.from(new Set((hours || []).filter((hour) => Number.isInteger(hour) && hour >= 10 && hour <= 22))).sort((a, b) => a - b);
+}
+
+function normalizeDayMap(dayMap) {
+  const next = createEmptyDayMap();
+  DAY_KEYS.forEach((day) => {
+    next[day] = sanitizeHours(dayMap?.[day]);
+  });
+  return next;
+}
+
+function createEmptyDraft() {
+  return {
+    mode: "unknown",
+    normalizedText: "",
+    available: createEmptyDayMap(),
+    unavailable: createEmptyDayMap(),
+    uncertain: createEmptyDayMap(),
+    lastIntent: "overwrite",
+    needsConfirmation: false,
+    clarificationQuestion: ""
+  };
+}
+
+function normalizeDraft(raw) {
+  const base = createEmptyDraft();
+  return {
+    mode: ["unknown", "whole_week_with_exceptions", "explicit_slots_only"].includes(raw?.mode) ? raw.mode : base.mode,
+    normalizedText: String(raw?.normalizedText || raw?.normalized_text || ""),
+    available: normalizeDayMap(raw?.available),
+    unavailable: normalizeDayMap(raw?.unavailable),
+    uncertain: normalizeDayMap(raw?.uncertain),
+    lastIntent: ["overwrite", "patch", "confirm", "clarify"].includes(raw?.lastIntent || raw?.intent)
+      ? (raw.lastIntent || raw.intent)
+      : base.lastIntent,
+    needsConfirmation: Boolean(raw?.needsConfirmation ?? raw?.needs_confirmation),
+    clarificationQuestion: String(raw?.clarificationQuestion || raw?.clarification_question || "")
+  };
+}
+
 function sanitizeSlots(slots) {
   return Array.from(new Set((slots || []).filter((slot) => {
     const [day, hour] = String(slot).split("-").map(Number);
     return Number.isInteger(day) && Number.isInteger(hour) && day >= 0 && day <= 6 && hour >= 10 && hour <= 22;
-  }))).sort((a, b) => {
-    const [dayA, hourA] = a.split("-").map(Number);
-    const [dayB, hourB] = b.split("-").map(Number);
-    return (dayA - dayB) || (hourA - hourB);
+  }))).sort((left, right) => {
+    const [leftDay, leftHour] = left.split("-").map(Number);
+    const [rightDay, rightHour] = right.split("-").map(Number);
+    return (leftDay - rightDay) || (leftHour - rightHour);
   });
 }
 
 function dayMapToSlots(dayMap) {
   const slots = [];
 
-  for (let day = 0; day <= 6; day += 1) {
-    const hours = Array.isArray(dayMap?.[String(day)]) ? dayMap[String(day)] : [];
-    hours.forEach((hour) => {
-      if (Number.isInteger(hour) && hour >= 10 && hour <= 22) {
-        slots.push(`${day}-${hour}`);
-      }
+  DAY_KEYS.forEach((day) => {
+    sanitizeHours(dayMap?.[day]).forEach((hour) => {
+      slots.push(`${day}-${hour}`);
     });
-  }
+  });
 
   return sanitizeSlots(slots);
 }
 
+function computeAvailableSlots(draft) {
+  const available = new Set();
+  const unavailable = new Set(dayMapToSlots(draft.unavailable));
+  const uncertain = new Set(dayMapToSlots(draft.uncertain));
+
+  if (draft.mode === "whole_week_with_exceptions") {
+    for (let day = 0; day <= 6; day += 1) {
+      OPEN_HOURS.forEach((hour) => {
+        const slot = `${day}-${hour}`;
+        if (!unavailable.has(slot) && !uncertain.has(slot)) {
+          available.add(slot);
+        }
+      });
+    }
+  } else {
+    dayMapToSlots(draft.available).forEach((slot) => {
+      if (!unavailable.has(slot) && !uncertain.has(slot)) {
+        available.add(slot);
+      }
+    });
+  }
+
+  return sanitizeSlots(Array.from(available));
+}
+
 function buildSummaryFromSlots(slots) {
   if (!slots.length) {
-    return "暂时没有识别到明确可用时间。";
+    return "";
   }
 
   const dayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
@@ -272,7 +345,7 @@ function buildSummaryFromSlots(slots) {
   });
 
   return Array.from(grouped.entries()).map(([day, hours]) => {
-    const sorted = Array.from(new Set(hours)).sort((a, b) => a - b);
+    const sorted = sanitizeHours(hours);
     const ranges = [];
     let start = sorted[0];
     let end = sorted[0];
