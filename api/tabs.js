@@ -10,9 +10,15 @@ module.exports = async function handler(req, res) {
 
     if (req.method === "GET") {
       const song = String(req.query?.song || "").trim();
+      const file = String(req.query?.file || "").trim();
       if (!song) {
         const songs = await listSongs();
         res.status(200).json({ songs });
+        return;
+      }
+
+      if (file) {
+        await downloadSongFile(song, file, res);
         return;
       }
 
@@ -64,12 +70,14 @@ module.exports = async function handler(req, res) {
         };
 
         for (const file of files) {
-          const safeName = sanitizeFileName(decodeUploadedName(file.originalname));
+          const displayName = sanitizeFileName(decodeUploadedName(file.originalname));
+          const safeName = displayName;
           const targetPath = path.join(songPath, safeName);
           await fs.writeFile(targetPath, file.buffer);
           metadata.songs[songName].files[safeName] = {
             uploadedBy: uploader || "未知成员",
-            uploadedAt: new Date().toISOString()
+            uploadedAt: new Date().toISOString(),
+            displayName
           };
         }
 
@@ -155,16 +163,39 @@ async function listSongFiles(song) {
     .filter((entry) => entry.isFile())
     .map((entry) => {
       const fileMeta = metadata.songs[songName]?.files?.[entry.name] || {};
-      const displayName = normalizeDisplayName(entry.name);
+      const displayName = sanitizeFileName(fileMeta.displayName || normalizeDisplayName(entry.name));
       return {
         name: displayName,
         rawName: entry.name,
         href: `/tabs/${encodeURIComponent(songName)}/${encodeURIComponent(entry.name)}`,
+        downloadHref: `/api/tabs?song=${encodeURIComponent(songName)}&file=${encodeURIComponent(entry.name)}`,
         uploadedBy: fileMeta.uploadedBy || "",
         uploadedAt: fileMeta.uploadedAt || ""
       };
     })
     .sort((left, right) => left.name.localeCompare(right.name, "zh-CN"));
+}
+
+async function downloadSongFile(song, file, res) {
+  const songName = decodeURIComponent(song);
+  const fileName = decodeURIComponent(file);
+  const songPath = resolveSongPath(songName);
+  const filePath = path.resolve(songPath, fileName);
+
+  if (!filePath.startsWith(songPath + path.sep) && filePath !== path.join(songPath, fileName)) {
+    const error = new Error("Invalid file path");
+    error.code = "EINVAL";
+    throw error;
+  }
+
+  await fs.access(filePath);
+
+  const metadata = await readMeta();
+  const fileMeta = metadata.songs[songName]?.files?.[fileName] || {};
+  const downloadName = sanitizeFileName(fileMeta.displayName || normalizeDisplayName(fileName) || fileName);
+
+  res.setHeader("Cache-Control", "no-store");
+  res.download(filePath, downloadName);
 }
 
 async function readMeta() {
