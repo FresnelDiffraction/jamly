@@ -49,6 +49,9 @@ async function bootstrap() {
   setupVoiceRecognition();
 
   composerForm.addEventListener("submit", handleSubmit);
+  memberSelect?.addEventListener("change", () => {
+    renderChat();
+  });
   resetButton.addEventListener("click", resetState);
   clearMemberButton.addEventListener("click", clearCurrentMemberState);
   todoForm.addEventListener("submit", handleTodoSubmit);
@@ -451,16 +454,19 @@ function renderAll() {
 }
 
 function renderChat() {
+  const currentMember = memberSelect?.value || MEMBERS[0];
   const intro = `
     <div class="message bot">
       你好，我是 Jamly。你像在微信群里一样直接说这周什么时候有空就行，例如：我周五晚上约了朋友吃饭，周一下午2点到4点有课，其他时候都可以。我会先维护你的本周草稿状态，再帮你整理成统一的时间段；如果有“可能有事”的时间，我也会把它记成待定。
-      <small>系统消息</small>
+      <small>系统消息 · 当前查看：${escapeHtml(currentMember)}</small>
     </div>
   `;
 
-  const items = state.messages.map((message) => {
+  const items = state.messages
+    .filter((message) => message.member === currentMember)
+    .map((message) => {
     const meta = message.role === "user"
-      ? `${message.member} · ${message.timestamp}`
+      ? `${currentMember} · ${message.timestamp}`
       : `Jamly · ${message.timestamp}`;
 
     return `
@@ -469,7 +475,7 @@ function renderChat() {
         <small>${meta}</small>
       </div>
     `;
-  });
+    });
 
   chatMessages.innerHTML = intro + items.join("");
   chatMessages.scrollTop = chatMessages.scrollHeight;
