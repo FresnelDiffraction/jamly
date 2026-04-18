@@ -1,0 +1,28 @@
+name: Deploy Jamly
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Hong Kong server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.JAMLY_HOST }}
+          username: ${{ secrets.JAMLY_USERNAME }}
+          password: ${{ secrets.JAMLY_PASSWORD }}
+          port: ${{ secrets.JAMLY_PORT }}
+          script: |
+            set -e
+            cd /var/www/jamly/current
+            git fetch origin main:refs/remotes/origin/main
+            git reset --hard origin/main
+            npm install --omit=dev
+            pm2 restart jamly
+            pm2 save
