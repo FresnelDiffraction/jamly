@@ -1,15 +1,15 @@
+const fs = require("fs/promises");
+const path = require("path");
+
 const STATE_KEY = process.env.JAMLY_STATE_KEY || "jamly:shared-state";
+const STATE_FILE = process.env.JAMLY_STATE_FILE || path.join(process.cwd(), ".jamly-state.json");
 
 module.exports = async function handler(req, res) {
-  const kv = getKvConfig();
-  if (!kv) {
-    res.status(503).send("Missing KV_REST_API_URL/KV_REST_API_TOKEN or UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN");
-    return;
-  }
+  const backend = getStorageBackend();
 
   try {
     if (req.method === "GET") {
-      const current = await getState(kv);
+      const current = await getState(backend);
       if (!current) {
         res.status(404).send("Shared state not initialized");
         return;
@@ -26,7 +26,7 @@ module.exports = async function handler(req, res) {
 
     const body = req.body || {};
     const action = String(body.action || "").trim();
-    const current = (await getState(kv)) || createEmptyState();
+    const current = (await getState(backend)) || createEmptyState();
     let next = current;
 
     if (action === "setSubmission") {
@@ -79,58 +79,80 @@ module.exports = async function handler(req, res) {
     }
 
     next.updatedAt = Date.now();
-    await setState(kv, next);
+    await setState(backend, next);
     res.status(200).json(next);
   } catch (error) {
     res.status(500).send(error.message || "Shared state request failed");
   }
 };
 
-function getKvConfig() {
+function getStorageBackend() {
   const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL || "";
   const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN || "";
 
-  if (!url || !token) {
-    return null;
+  if (url && token) {
+    return {
+      kind: "kv",
+      url: url.replace(/\/+$/, ""),
+      token
+    };
   }
 
   return {
-    url: url.replace(/\/+$/, ""),
-    token
+    kind: "file",
+    file: STATE_FILE
   };
 }
 
-async function getState(kv) {
-  const response = await fetch(`${kv.url}/get/${encodeURIComponent(STATE_KEY)}`, {
-    headers: {
-      Authorization: `Bearer ${kv.token}`
-    }
-  });
+async function getState(backend) {
+  if (backend.kind === "kv") {
+    const response = await fetch(`${backend.url}/get/${encodeURIComponent(STATE_KEY)}`, {
+      headers: {
+        Authorization: `Bearer ${backend.token}`
+      }
+    });
 
-  if (!response.ok) {
-    throw new Error(await response.text() || "KV get failed");
+    if (!response.ok) {
+      throw new Error(await response.text() || "KV get failed");
+    }
+
+    const data = await response.json();
+    if (!data.result) {
+      return null;
+    }
+
+    return normalizeState(JSON.parse(data.result));
   }
 
-  const data = await response.json();
-  if (!data.result) {
+  try {
+    const content = await fs.readFile(backend.file, "utf8");
+    return normalizeState(JSON.parse(content));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function setState(backend, state) {
+  if (backend.kind === "kv") {
+    const encoded = encodeURIComponent(JSON.stringify(state));
+    const response = await fetch(`${backend.url}/set/${encodeURIComponent(STATE_KEY)}/${encoded}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${backend.token}`
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text() || "KV set failed");
+    }
     return null;
   }
 
-  return normalizeState(JSON.parse(data.result));
-}
-
-async function setState(kv, state) {
-  const encoded = encodeURIComponent(JSON.stringify(state));
-  const response = await fetch(`${kv.url}/set/${encodeURIComponent(STATE_KEY)}/${encoded}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${kv.token}`
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(await response.text() || "KV set failed");
-  }
+  await fs.mkdir(path.dirname(backend.file), { recursive: true });
+  await fs.writeFile(backend.file, JSON.stringify(state), "utf8");
 }
 
 function createEmptyState() {
