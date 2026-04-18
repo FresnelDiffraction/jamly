@@ -3,6 +3,7 @@ const path = require("path");
 
 const parseHandler = require("./api/parse");
 const stateHandler = require("./api/state");
+const tabsHandler = require("./api/tabs");
 const transcribeHandler = require("./api/transcribe");
 
 const app = express();
@@ -24,6 +25,7 @@ app.use((req, res, next) => {
 
 app.all("/api/parse", (req, res) => parseHandler(req, res));
 app.all("/api/state", (req, res) => stateHandler(req, res));
+app.all("/api/tabs", (req, res) => tabsHandler(req, res));
 app.all("/api/transcribe", (req, res) => transcribeHandler(req, res));
 
 app.use(express.static(__dirname));

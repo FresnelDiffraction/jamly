@@ -374,7 +374,8 @@ input::placeholder {
 }
 
 .summary-content,
-.status-grid {
+.status-grid,
+.tabs-list {
   margin-top: 18px;
   display: grid;
   gap: 12px;
@@ -386,11 +387,52 @@ input::placeholder {
 
 .todo-item,
 .slot-item,
-.status-card {
+.status-card,
+.tabs-item {
   border: 1px solid rgba(198, 234, 221, 0.12);
   border-radius: 18px;
   padding: 14px 16px;
   background: rgba(242, 251, 247, 0.07);
+}
+
+.tabs-panel {
+  margin-top: 18px;
+}
+
+.tabs-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tabs-back-button {
+  min-height: 40px;
+  padding: 8px 14px;
+}
+
+.tabs-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+}
+
+.tabs-song-button,
+.tabs-file-link {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.tabs-song-button {
+  cursor: pointer;
+}
+
+.tabs-item-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+  word-break: break-word;
 }
 
 .todo-time,

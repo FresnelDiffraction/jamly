@@ -70,12 +70,16 @@ const todoTimeInput = document.getElementById("todo-time");
 const todoTextInput = document.getElementById("todo-text");
 const todoStatus = document.getElementById("todo-status");
 const todoList = document.getElementById("todo-list");
+const tabsList = document.getElementById("tabs-list");
+const tabsBackButton = document.getElementById("tabs-back-button");
+const tabsBreadcrumb = document.getElementById("tabs-breadcrumb");
 
 let speechRecognition = null;
 let isRecording = false;
 let isSubmitting = false;
 let remoteSyncTimer = null;
 let voiceStopRequested = false;
+let currentTabSong = "";
 
 bootstrap().catch((error) => {
   console.error("Jamly bootstrap failed:", error);
@@ -83,6 +87,7 @@ bootstrap().catch((error) => {
 
 async function bootstrap() {
   renderAll();
+  await renderTabs();
   setupVoiceRecognition();
 
   composerForm.addEventListener("submit", handleSubmit);
@@ -112,6 +117,10 @@ async function bootstrap() {
   remoteSyncTimer = window.setInterval(() => {
     syncStateFromServer({ allowUploadLocal: false, silent: true });
   }, REMOTE_SYNC_INTERVAL);
+
+  tabsBackButton?.addEventListener("click", () => {
+    renderTabs("");
+  });
 }
 
 async function handleSubmit(event) {
@@ -259,6 +268,68 @@ function renderAll() {
   renderSummary();
   renderStatus();
   renderTodos();
+}
+
+async function renderTabs(song = currentTabSong) {
+  currentTabSong = song;
+  if (!tabsList || !tabsBreadcrumb || !tabsBackButton) {
+    return;
+  }
+
+  tabsBackButton.hidden = !song;
+  tabsBreadcrumb.textContent = song ? `曲谱总表 / ${song}` : "曲谱总表";
+  tabsList.innerHTML = `<div class="empty-copy">正在读取曲谱...</div>`;
+
+  try {
+    const url = song ? `/api/tabs?song=${encodeURIComponent(song)}` : "/api/tabs";
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error("Tabs fetch failed");
+    }
+
+    const data = await response.json();
+    if (!song) {
+      renderSongList(data.songs || []);
+    } else {
+      renderSongFiles(song, data.files || []);
+    }
+  } catch (error) {
+    tabsList.innerHTML = `<div class="empty-copy">曲谱暂时读取失败，请稍后再试。</div>`;
+  }
+}
+
+function renderSongList(songs) {
+  if (!songs.length) {
+    tabsList.innerHTML = `<div class="empty-copy">还没有上传任何曲谱目录。</div>`;
+    return;
+  }
+
+  tabsList.innerHTML = songs.map((song) => `
+    <button type="button" class="tabs-item tabs-song-button" data-song-name="${escapeHtml(song.name)}">
+      <span class="tabs-item-title">${escapeHtml(song.name)}</span>
+      <span class="slot-meta">点击查看这首歌的所有文件</span>
+    </button>
+  `).join("");
+
+  tabsList.querySelectorAll("[data-song-name]").forEach((button) => {
+    button.addEventListener("click", () => {
+      renderTabs(button.dataset.songName);
+    });
+  });
+}
+
+function renderSongFiles(song, files) {
+  if (!files.length) {
+    tabsList.innerHTML = `<div class="empty-copy">${escapeHtml(song)} 下面还没有文件。</div>`;
+    return;
+  }
+
+  tabsList.innerHTML = files.map((file) => `
+    <a class="tabs-item tabs-file-link" href="${encodeURI(file.href)}" target="_blank" rel="noreferrer">
+      <span class="tabs-item-title">${escapeHtml(file.name)}</span>
+      <span class="slot-meta">点击打开或下载</span>
+    </a>
+  `).join("");
 }
 
 function renderChat() {
