@@ -301,11 +301,23 @@ function renderSongFiles(song, files) {
         <span class="tabs-item-title">${escapeHtml(file.name)}</span>
         <span class="slot-meta">${file.uploadedBy ? `上传者：${escapeHtml(file.uploadedBy)}` : "未记录上传者"}</span>
       </a>
-      <button type="button" class="ghost-button tabs-delete-button" data-file-name="${escapeHtml(file.rawName || file.name)}">删除文件</button>
+      <div class="tabs-file-actions">
+        <button type="button" class="ghost-button tabs-download-button" data-file-href="${encodeURI(file.href)}" data-file-name="${escapeHtml(file.rawName || file.name)}">下载文件</button>
+        <button type="button" class="ghost-button tabs-delete-button" data-file-name="${escapeHtml(file.rawName || file.name)}">删除文件</button>
+      </div>
     </div>
   `).join("");
 
+  tabsList.querySelectorAll("[data-file-href]").forEach((button) => {
+    button.addEventListener("click", () => {
+      downloadTabFile(button.dataset.fileHref, button.dataset.fileName);
+    });
+  });
+
   tabsList.querySelectorAll("[data-file-name]").forEach((button) => {
+    if (button.dataset.fileHref) {
+      return;
+    }
     button.addEventListener("click", () => {
       deleteTabFile(song, button.dataset.fileName);
     });
@@ -442,6 +454,37 @@ async function deleteTabFile(song, fileName) {
   } catch (error) {
     if (tabsUploadStatus) {
       tabsUploadStatus.textContent = `删除失败：${error.message || "请稍后再试"}`;
+    }
+  }
+}
+
+async function downloadTabFile(fileHref, fileName) {
+  if (tabsUploadStatus) {
+    tabsUploadStatus.textContent = "正在准备下载...";
+  }
+
+  try {
+    const response = await fetch(fileHref);
+    if (!response.ok) {
+      throw new Error(await response.text() || "Download failed");
+    }
+
+    const blob = await response.blob();
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = downloadUrl;
+    link.download = decodeURIComponent(fileName || "tab-file");
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(downloadUrl);
+
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = "文件已开始下载。";
+    }
+  } catch (error) {
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = `下载失败：${error.message || "请稍后再试"}`;
     }
   }
 }

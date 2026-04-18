@@ -467,6 +467,13 @@ input::placeholder {
   gap: 14px;
 }
 
+.tabs-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .tabs-file-link {
   display: flex;
   flex-direction: column;
@@ -568,6 +575,12 @@ input::placeholder {
   .tabs-song-actions,
   .tabs-file-item {
     grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tabs-file-actions {
+    width: 100%;
     flex-direction: column;
     align-items: stretch;
   }
