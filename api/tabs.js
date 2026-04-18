@@ -64,7 +64,7 @@ module.exports = async function handler(req, res) {
         };
 
         for (const file of files) {
-          const safeName = sanitizeFileName(file.originalname);
+          const safeName = sanitizeFileName(decodeUploadedName(file.originalname));
           const targetPath = path.join(songPath, safeName);
           await fs.writeFile(targetPath, file.buffer);
           metadata.songs[songName].files[safeName] = {
@@ -155,8 +155,10 @@ async function listSongFiles(song) {
     .filter((entry) => entry.isFile())
     .map((entry) => {
       const fileMeta = metadata.songs[songName]?.files?.[entry.name] || {};
+      const displayName = normalizeDisplayName(entry.name);
       return {
-        name: entry.name,
+        name: displayName,
+        rawName: entry.name,
         href: `/tabs/${encodeURIComponent(songName)}/${encodeURIComponent(entry.name)}`,
         uploadedBy: fileMeta.uploadedBy || "",
         uploadedAt: fileMeta.uploadedAt || ""
@@ -201,4 +203,41 @@ function sanitizeFileName(fileName) {
     .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function decodeUploadedName(fileName) {
+  const original = String(fileName || "");
+  try {
+    const decoded = Buffer.from(original, "latin1").toString("utf8");
+    return looksBetter(decoded, original) ? decoded : original;
+  } catch (error) {
+    return original;
+  }
+}
+
+function normalizeDisplayName(fileName) {
+  const original = String(fileName || "");
+  try {
+    const decoded = Buffer.from(original, "latin1").toString("utf8");
+    return looksBetter(decoded, original) ? decoded : original;
+  } catch (error) {
+    return original;
+  }
+}
+
+function looksBetter(candidate, original) {
+  if (!candidate || candidate.includes("�")) {
+    return false;
+  }
+  const originalScore = readableScore(original);
+  const candidateScore = readableScore(candidate);
+  return candidateScore > originalScore;
+}
+
+function readableScore(text) {
+  const value = String(text || "");
+  const cjk = (value.match(/[\u4e00-\u9fff]/g) || []).length;
+  const latin = (value.match(/[A-Za-z0-9._\-\s]/g) || []).length;
+  const mojibake = (value.match(/[ÃÅÆÐØÞ]/g) || []).length;
+  return cjk * 3 + latin - mojibake * 4;
 }

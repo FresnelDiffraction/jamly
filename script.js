@@ -298,7 +298,7 @@ function renderSongFiles(song, files) {
         <span class="tabs-item-title">${escapeHtml(file.name)}</span>
         <span class="slot-meta">${file.uploadedBy ? `上传者：${escapeHtml(file.uploadedBy)}` : "未记录上传者"}</span>
       </a>
-      <button type="button" class="ghost-button tabs-delete-button" data-file-name="${escapeHtml(file.name)}">删除文件</button>
+      <button type="button" class="ghost-button tabs-delete-button" data-file-name="${escapeHtml(file.rawName || file.name)}">删除文件</button>
     </div>
   `).join("");
 
