@@ -1,9 +1,9 @@
-const fs = require("fs/promises");
+﻿const fs = require("fs/promises");
 const path = require("path");
 
 const STATE_KEY = process.env.JAMLY_STATE_KEY || "jamly:shared-state";
 const STATE_FILE = process.env.JAMLY_STATE_FILE || path.join(process.cwd(), ".jamly-state.json");
-const MEMBERS = ["cold", "david", "圈", "星", "小安", "afai"];
+const MEMBERS = ["cold", "david", "\u5708", "\u661f", "\u5c0f\u5b89", "afai"];
 const DAY_KEYS = ["0", "1", "2", "3", "4", "5", "6"];
 
 module.exports = async function handler(req, res) {
@@ -178,11 +178,9 @@ function normalizeDayMap(dayMap) {
 
 function createEmptyDraft() {
   return {
-    mode: "unknown",
     normalizedText: "",
-    available: createEmptyDayMap(),
-    unavailable: createEmptyDayMap(),
-    uncertain: createEmptyDayMap(),
+    unavailableRules: [],
+    uncertainRules: [],
     lastIntent: "overwrite",
     needsConfirmation: false,
     clarificationQuestion: ""
@@ -211,17 +209,115 @@ function createEmptyState() {
 function normalizeDraft(raw) {
   const base = createEmptyDraft();
   return {
-    mode: ["unknown", "whole_week_with_exceptions", "explicit_slots_only"].includes(raw?.mode) ? raw.mode : base.mode,
     normalizedText: String(raw?.normalizedText || raw?.normalized_text || ""),
-    available: normalizeDayMap(raw?.available),
-    unavailable: normalizeDayMap(raw?.unavailable),
-    uncertain: normalizeDayMap(raw?.uncertain),
+    unavailableRules: normalizeRules(raw?.unavailableRules || raw?.unavailable_rules || raw?.unavailable),
+    uncertainRules: normalizeRules(raw?.uncertainRules || raw?.uncertain_rules || raw?.uncertain),
     lastIntent: ["overwrite", "patch", "confirm", "clarify"].includes(raw?.lastIntent || raw?.intent)
       ? (raw.lastIntent || raw.intent)
       : base.lastIntent,
     needsConfirmation: Boolean(raw?.needsConfirmation ?? raw?.needs_confirmation),
     clarificationQuestion: String(raw?.clarificationQuestion || raw?.clarification_question || "")
   };
+}
+
+function normalizeRules(input) {
+  if (Array.isArray(input)) {
+    return input
+      .map((rule) => normalizeRule(rule))
+      .filter(Boolean);
+  }
+
+  if (input && typeof input === "object") {
+    return legacyDayMapToRules(input);
+  }
+
+  return [];
+}
+
+function normalizeRule(rule) {
+  const days = Array.isArray(rule?.days)
+    ? Array.from(new Set(rule.days.map((day) => String(day)).filter((day) => DAY_KEYS.includes(day)))).sort()
+    : [];
+  const start = normalizeTime(rule?.start);
+  const end = normalizeTime(rule?.end);
+  if (!days.length || !start || !end || toMinutes(end) <= toMinutes(start)) {
+    return null;
+  }
+
+  return {
+    days,
+    start,
+    end,
+    reason: String(rule?.reason || "")
+  };
+}
+
+function legacyDayMapToRules(dayMap) {
+  const rules = [];
+  DAY_KEYS.forEach((day) => {
+    const hours = sanitizeHours(dayMap?.[day]);
+    if (!hours.length) {
+      return;
+    }
+
+    let start = hours[0];
+    let previous = hours[0];
+    for (let index = 1; index < hours.length; index += 1) {
+      const hour = hours[index];
+      if (hour === previous + 1) {
+        previous = hour;
+        continue;
+      }
+
+      rules.push({
+        days: [day],
+        start: formatHour(start),
+        end: formatHour(previous + 1),
+        reason: ""
+      });
+      start = hour;
+      previous = hour;
+    }
+
+    rules.push({
+      days: [day],
+      start: formatHour(start),
+      end: formatHour(previous + 1),
+      reason: ""
+    });
+  });
+  return rules;
+}
+
+function normalizeTime(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return "";
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return "";
+  }
+
+  const clampedMinutes = Math.max(10 * 60, Math.min(23 * 60, hour * 60 + minute));
+  const normalizedHour = Math.floor(clampedMinutes / 60);
+  const normalizedMinute = clampedMinutes % 60;
+  return `${String(normalizedHour).padStart(2, "0")}:${String(normalizedMinute).padStart(2, "0")}`;
+}
+
+function toMinutes(time) {
+  const match = String(time || "").match(/^(\d{2}):(\d{2})$/);
+  if (!match) {
+    return NaN;
+  }
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function formatHour(hour) {
+  return `${String(hour).padStart(2, "0")}:00`;
 }
 
 function sanitizeSlots(slots) {
@@ -288,3 +384,5 @@ function normalizeState(raw) {
     updatedAt: Number(raw?.updatedAt || 0)
   };
 }
+
+

@@ -639,7 +639,7 @@ async function parseAvailabilitySmart(rawText, member, previousSubmission) {
     };
   } catch (error) {
     console.warn("Remote parse failed, fallback to conservative local mode:", error);
-    return parseAvailabilityFallback(rawText, previousSubmission?.draft || createEmptyDraft());
+    return parseAvailabilityFallbackRuleBased(rawText, previousSubmission?.draft || createEmptyDraft());
   }
 }
 
@@ -1110,11 +1110,9 @@ function normalizeDayMap(dayMap) {
 
 function createEmptyDraft() {
   return {
-    mode: "unknown",
     normalizedText: "",
-    available: createEmptyDayMap(),
-    unavailable: createEmptyDayMap(),
-    uncertain: createEmptyDayMap(),
+    unavailableRules: [],
+    uncertainRules: [],
     lastIntent: "overwrite",
     needsConfirmation: false,
     clarificationQuestion: ""
@@ -1143,17 +1141,84 @@ function createEmptyState() {
 function normalizeDraft(raw) {
   const base = createEmptyDraft();
   return {
-    mode: ["unknown", "whole_week_with_exceptions", "explicit_slots_only"].includes(raw?.mode) ? raw.mode : base.mode,
     normalizedText: String(raw?.normalizedText || raw?.normalized_text || ""),
-    available: normalizeDayMap(raw?.available),
-    unavailable: normalizeDayMap(raw?.unavailable),
-    uncertain: normalizeDayMap(raw?.uncertain),
+    unavailableRules: normalizeRules(raw?.unavailableRules || raw?.unavailable_rules || raw?.unavailable),
+    uncertainRules: normalizeRules(raw?.uncertainRules || raw?.uncertain_rules || raw?.uncertain),
     lastIntent: ["overwrite", "patch", "confirm", "clarify"].includes(raw?.lastIntent || raw?.intent)
       ? (raw.lastIntent || raw.intent)
       : base.lastIntent,
     needsConfirmation: Boolean(raw?.needsConfirmation ?? raw?.needs_confirmation),
     clarificationQuestion: String(raw?.clarificationQuestion || raw?.clarification_question || "")
   };
+}
+
+function normalizeRules(input) {
+  if (Array.isArray(input)) {
+    return input
+      .map((rule) => normalizeRule(rule))
+      .filter(Boolean);
+  }
+
+  if (input && typeof input === "object") {
+    return legacyDayMapToRules(input);
+  }
+
+  return [];
+}
+
+function normalizeRule(rule) {
+  const days = Array.isArray(rule?.days)
+    ? Array.from(new Set(rule.days.map((day) => String(day)).filter((day) => String(day) >= "0" && String(day) <= "6"))).sort()
+    : [];
+  const start = normalizeTime(rule?.start);
+  const end = normalizeTime(rule?.end);
+  if (!days.length || !start || !end || toMinutes(end) <= toMinutes(start)) {
+    return null;
+  }
+
+  return {
+    days,
+    start,
+    end,
+    reason: String(rule?.reason || "")
+  };
+}
+
+function legacyDayMapToRules(dayMap) {
+  const rules = [];
+  Object.keys(createEmptyDayMap()).forEach((day) => {
+    const hours = sanitizeHours(dayMap?.[day]);
+    if (!hours.length) {
+      return;
+    }
+
+    let start = hours[0];
+    let previous = hours[0];
+    for (let index = 1; index < hours.length; index += 1) {
+      const hour = hours[index];
+      if (hour === previous + 1) {
+        previous = hour;
+        continue;
+      }
+
+      rules.push({
+        days: [day],
+        start: formatHour(start),
+        end: formatHour(previous + 1),
+        reason: ""
+      });
+      start = hour;
+      previous = hour;
+    }
+
+    rules.push({
+      days: [day],
+      start: formatHour(start),
+      end: formatHour(previous + 1),
+      reason: ""
+    });
+  });
+  return rules;
 }
 
 function normalizeSubmission(raw) {
@@ -1217,28 +1282,9 @@ function hasMeaningfulData(targetState) {
 }
 
 function computeAvailableSlotsFromDraft(draft) {
-  const available = new Set();
-  const unavailable = new Set(dayMapToSlots(draft.unavailable));
-  const uncertain = new Set(dayMapToSlots(draft.uncertain));
-
-  if (draft.mode === "whole_week_with_exceptions") {
-    for (let day = 0; day < 7; day += 1) {
-      OPEN_HOURS.forEach((hour) => {
-        const slot = makeSlot(day, hour);
-        if (!unavailable.has(slot) && !uncertain.has(slot)) {
-          available.add(slot);
-        }
-      });
-    }
-  } else {
-    dayMapToSlots(draft.available).forEach((slot) => {
-      if (!unavailable.has(slot) && !uncertain.has(slot)) {
-        available.add(slot);
-      }
-    });
-  }
-
-  return sanitizeSlots(Array.from(available));
+  const unavailable = expandRulesToSlots(draft.unavailableRules);
+  const uncertain = subtractSlots(expandRulesToSlots(draft.uncertainRules), unavailable);
+  return subtractSlots(buildAllWeekSlots(), [...unavailable, ...uncertain]);
 }
 
 function buildAllWeekSlots() {
@@ -1263,13 +1309,7 @@ function sanitizeSlots(slots) {
 }
 
 function dayMapToSlots(dayMap) {
-  const slots = [];
-  Object.keys(createEmptyDayMap()).forEach((day) => {
-    sanitizeHours(dayMap?.[day]).forEach((hour) => {
-      slots.push(`${day}-${hour}`);
-    });
-  });
-  return sanitizeSlots(slots);
+  return expandRulesToSlots(legacyDayMapToRules(dayMap || {}));
 }
 
 function loadLocalState() {
@@ -1298,6 +1338,67 @@ function formatRange(start, end) {
   return `${pad(start)}:00~${pad(end + 1)}:00`;
 }
 
+function normalizeTime(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return "";
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return "";
+  }
+
+  const clampedMinutes = Math.max(10 * 60, Math.min(23 * 60, hour * 60 + minute));
+  const normalizedHour = Math.floor(clampedMinutes / 60);
+  const normalizedMinute = clampedMinutes % 60;
+  return `${String(normalizedHour).padStart(2, "0")}:${String(normalizedMinute).padStart(2, "0")}`;
+}
+
+function toMinutes(time) {
+  const match = String(time || "").match(/^(\d{2}):(\d{2})$/);
+  if (!match) {
+    return NaN;
+  }
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function formatHour(hour) {
+  return `${pad(hour)}:00`;
+}
+
+function expandRulesToSlots(rules) {
+  const slots = new Set();
+
+  (rules || []).forEach((rule) => {
+    const normalized = normalizeRule(rule);
+    if (!normalized) {
+      return;
+    }
+
+    const startMinutes = toMinutes(normalized.start);
+    const endMinutes = toMinutes(normalized.end);
+    normalized.days.forEach((day) => {
+      OPEN_HOURS.forEach((hour) => {
+        const slotStart = hour * 60;
+        const slotEnd = (hour + 1) * 60;
+        if (startMinutes < slotEnd && endMinutes > slotStart) {
+          slots.add(makeSlot(Number(day), hour));
+        }
+      });
+    });
+  });
+
+  return sanitizeSlots(Array.from(slots));
+}
+
+function subtractSlots(base, excluded) {
+  const excludedSet = new Set(excluded || []);
+  return sanitizeSlots((base || []).filter((slot) => !excludedSet.has(slot)));
+}
+
 function pad(value) {
   return String(value).padStart(2, "0");
 }
@@ -1313,4 +1414,29 @@ function escapeHtml(text) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+MEMBERS.splice(0, MEMBERS.length, "cold", "david", "\u5708", "\u661f", "\u5c0f\u5b89", "afai");
+WEEKDAYS.splice(0, WEEKDAYS.length, "\u5468\u4e00", "\u5468\u4e8c", "\u5468\u4e09", "\u5468\u56db", "\u5468\u4e94", "\u5468\u516d", "\u5468\u65e5");
+
+function parseAvailabilityFallbackRuleBased(rawText, currentDraft) {
+  const draft = normalizeDraft(currentDraft);
+  draft.normalizedText = rawText;
+  draft.lastIntent = "patch";
+  draft.needsConfirmation = true;
+  draft.clarificationQuestion = "\u6211\u5148\u628a\u8fd9\u53e5\u8bdd\u6682\u5b58\u8fdb\u5f53\u524d\u8349\u7a3f\u4e86\u3002\u73b0\u5728\u9ed8\u8ba4\u4f60\u6ca1\u63d0\u5230\u7684\u65f6\u95f4\u90fd\u53ef\u4ee5\uff0c\u4f46\u672c\u5730\u515c\u5e95\u89e3\u6790\u4e0d\u591f\u7a33\u5b9a\uff1b\u5982\u679c\u7ed3\u679c\u4e0d\u5bf9\uff0c\u4f60\u53ef\u4ee5\u518d\u8865\u4e00\u53e5\u66f4\u5b8c\u6574\u7684\u65f6\u95f4\u8bf4\u660e\u3002";
+
+  const unavailableSlots = expandRulesToSlots(draft.unavailableRules);
+  const uncertainSlots = subtractSlots(expandRulesToSlots(draft.uncertainRules), unavailableSlots);
+  const availableSlots = computeAvailableSlotsFromDraft(draft);
+
+  return {
+    draft,
+    availableSlots,
+    uncertainSlots,
+    summary: buildAvailabilitySummary(availableSlots),
+    uncertainSummary: buildAvailabilitySummary(uncertainSlots),
+    needsConfirmation: draft.needsConfirmation,
+    clarificationQuestion: draft.clarificationQuestion
+  };
 }

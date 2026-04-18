@@ -31,7 +31,7 @@ module.exports = async function handler(req, res) {
     : [];
 
   const schema = {
-    name: "jamly_stateful_parse",
+    name: "jamly_rule_parse",
     schema: {
       type: "object",
       additionalProperties: false,
@@ -43,13 +43,8 @@ module.exports = async function handler(req, res) {
         normalized_text: {
           type: "string"
         },
-        mode: {
-          type: "string",
-          enum: ["unknown", "whole_week_with_exceptions", "explicit_slots_only"]
-        },
-        available: buildDayMapSchema(),
-        unavailable: buildDayMapSchema(),
-        uncertain: buildDayMapSchema(),
+        unavailable_rules: buildRulesSchema(),
+        uncertain_rules: buildRulesSchema(),
         needs_confirmation: {
           type: "boolean"
         },
@@ -60,10 +55,8 @@ module.exports = async function handler(req, res) {
       required: [
         "intent",
         "normalized_text",
-        "mode",
-        "available",
-        "unavailable",
-        "uncertain",
+        "unavailable_rules",
+        "uncertain_rules",
         "needs_confirmation",
         "clarification_question"
       ]
@@ -72,50 +65,58 @@ module.exports = async function handler(req, res) {
   };
 
   const systemPrompt = `
-You are Jamly's Chinese band rehearsal availability parser.
-Your job is to update ONE member's weekly draft state, not to parse a message in isolation.
+You are Jamly's Chinese rehearsal-time parser.
+You do NOT output final hour slots directly.
+You output a rule-based draft, then the app will deterministically expand those rules into one-hour blocks.
 
-The rehearsal room only accepts hours 10:00-23:00. Output hours 10-22 as one-hour slot starts.
+Hard product rule:
+- Any time the user does NOT mention is AVAILABLE by default.
+- Therefore the draft only needs two rule lists:
+  1. unavailable_rules
+  2. uncertain_rules
 
-You will receive:
-1. current_draft: the member's current weekly draft state
-2. recent_messages: recent conversation snippets for this member
+You receive:
+1. current_draft: this member's current weekly draft state
+2. recent_messages: the latest few messages for this member
 3. new_message: the latest user message
 
-Return the FULL NEXT DRAFT after applying the new message to the current draft.
+Your task:
+- Understand the latest message in context
+- Decide whether it is overwrite / patch / confirm / clarify
+- Return the FULL NEXT DRAFT rule lists after applying the latest message
 
-State semantics:
-- mode = "whole_week_with_exceptions":
-  default assumption is the member is available for the whole week, then remove unavailable blocks and mark uncertain blocks separately.
-- mode = "explicit_slots_only":
-  only the hours listed in available are definitely available.
-- mode = "unknown":
-  you still cannot safely infer the member's full default rule.
+Interpretation guidance:
+- "其他时候都可以", "没说的时间都可以", "除此之外都可以", "别的时候都行" all reinforce the product default: unspecified time is available.
+- Mentions of events or obligations (上课, 开会, 看live, 吃饭, 有事, 小组会, 大组会, 排练, 医生, 加班, 约了朋友) mean that period is unavailable unless clearly marked otherwise.
+- "可能", "看情况", "也许", "不确定", "随时可能" should become uncertain_rules, not unavailable_rules.
+- Preserve existing unrelated rules when the user is obviously patching or correcting.
+- If the user says "不是，我说的是..." or similar, correct only the relevant earlier part.
+- Do not say you failed to understand if most of the message is clear.
+- Ask only one narrow clarification question when there is a real unresolved ambiguity.
 
-Important behavior:
-- Distinguish intent:
-  - overwrite: the user restated the schedule from scratch
-  - patch: the user is supplementing or correcting the existing draft
-  - confirm: the user confirms the previous understanding
-  - clarify: the user answers a narrow clarification question
-- Phrases like "其他时间都可以", "没说的时间都可以", "除此之外都可以", "别的时候都行" usually mean mode should become "whole_week_with_exceptions".
-- Mentions of events or commitments (上课, 开会, 看live, 吃饭, 有事, 小组会, 大组会, 排练, 医生, 加班, 约了朋友) mean that period is NOT available unless the user explicitly says otherwise.
-- Words like "可能", "看情况", "大概", "也许", "不确定", "随时可能" should usually become UNCERTAIN, not definitely unavailable.
-- "周五晚上" defaults to hours 18-22.
-- "下午2点到4点" means 14 and 15. "晚上7点到10点" means 19, 20, 21.
-- Never expand a local exclusion into a whole day.
-- Never drop previously known constraints when the user is clearly patching the existing draft.
-- If the user says "我没说的其他时间都可以", preserve earlier exceptions from current_draft and only update the default assumption.
-- If the user is correcting a previous misunderstanding ("不是，我说的是..."), update only the corrected parts and preserve unrelated previously known parts.
+Rule format requirements:
+- Each rule has:
+  - days: array of weekday strings "0" to "6" where Monday="0"
+  - start: "HH:MM"
+  - end: "HH:MM"
+  - reason: short Chinese text
+- Use exact clock times when the user gives them, including half hours such as 11:30.
+- Expand day ranges like "周一到周五" into every affected day.
+- "周五晚上" usually means 18:00-23:00.
+- "下午2点到4点" means 14:00-16:00.
+- "晚上7点到10点" means 19:00-22:00.
+- Never convert a local exception into a whole-day exception.
+- Never output availability rules. Unspecified time is already available.
 
-Clarification policy:
-- Do NOT say "I didn't understand" if most of the message is understandable.
-- If only one key thing is missing, preserve everything else and ask one narrow clarification question.
-- Set needs_confirmation=true only when there is a real unresolved ambiguity.
+Examples:
+- "周一到周五10:00到11:30都不行，其他时候可以"
+  => unavailable_rules with 5 separate affected days or one rule containing days ["0","1","2","3","4"], start "10:00", end "11:30"
+- "周四下午随时可能有小组会"
+  => uncertain rule for Thursday afternoon
+- "我没说的其他时间都可以，我不是说周二晚上18:00之后不可以吗"
+  => preserve earlier Tuesday evening unavailable rule, do not delete it
 
-Output requirements:
-- Return only JSON matching the schema.
-- available/unavailable/uncertain must represent the FULL NEXT DRAFT after applying the new message.
+Return only JSON matching the schema.
 `.trim();
 
   const userPayload = JSON.stringify({
@@ -162,18 +163,20 @@ Output requirements:
     const content = extractResponseText(data);
     const parsed = JSON.parse(content);
     const draft = normalizeDraft({
-      mode: parsed.mode,
       normalizedText: parsed.normalized_text,
-      available: parsed.available,
-      unavailable: parsed.unavailable,
-      uncertain: parsed.uncertain,
+      unavailableRules: parsed.unavailable_rules,
+      uncertainRules: parsed.uncertain_rules,
       lastIntent: parsed.intent,
       needsConfirmation: Boolean(parsed.needs_confirmation),
       clarificationQuestion: String(parsed.clarification_question || "")
     });
 
-    const availableSlots = computeAvailableSlots(draft);
-    const uncertainSlots = dayMapToSlots(draft.uncertain);
+    const unavailableSlots = expandRulesToSlots(draft.unavailableRules);
+    const uncertainSlots = subtractSlots(
+      expandRulesToSlots(draft.uncertainRules),
+      unavailableSlots
+    );
+    const availableSlots = subtractSlots(buildAllWeekSlots(), [...unavailableSlots, ...uncertainSlots]);
 
     res.status(200).json({
       intent: draft.lastIntent,
@@ -190,24 +193,32 @@ Output requirements:
   }
 };
 
-function buildDayMapSchema() {
-  const properties = {};
-  DAY_KEYS.forEach((day) => {
-    properties[day] = {
-      type: "array",
-      items: {
-        type: "integer",
-        minimum: 10,
-        maximum: 22
-      }
-    };
-  });
-
+function buildRulesSchema() {
   return {
-    type: "object",
-    additionalProperties: false,
-    properties,
-    required: DAY_KEYS
+    type: "array",
+    items: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        days: {
+          type: "array",
+          items: {
+            type: "string",
+            enum: DAY_KEYS
+          }
+        },
+        start: {
+          type: "string"
+        },
+        end: {
+          type: "string"
+        },
+        reason: {
+          type: "string"
+        }
+      },
+      required: ["days", "start", "end", "reason"]
+    }
   };
 }
 
@@ -232,32 +243,11 @@ function extractResponseText(data) {
   return chunks.join("\n").trim();
 }
 
-function createEmptyDayMap() {
-  return DAY_KEYS.reduce((acc, day) => {
-    acc[day] = [];
-    return acc;
-  }, {});
-}
-
-function sanitizeHours(hours) {
-  return Array.from(new Set((hours || []).filter((hour) => Number.isInteger(hour) && hour >= 10 && hour <= 22))).sort((a, b) => a - b);
-}
-
-function normalizeDayMap(dayMap) {
-  const next = createEmptyDayMap();
-  DAY_KEYS.forEach((day) => {
-    next[day] = sanitizeHours(dayMap?.[day]);
-  });
-  return next;
-}
-
 function createEmptyDraft() {
   return {
-    mode: "unknown",
     normalizedText: "",
-    available: createEmptyDayMap(),
-    unavailable: createEmptyDayMap(),
-    uncertain: createEmptyDayMap(),
+    unavailableRules: [],
+    uncertainRules: [],
     lastIntent: "overwrite",
     needsConfirmation: false,
     clarificationQuestion: ""
@@ -267,17 +257,159 @@ function createEmptyDraft() {
 function normalizeDraft(raw) {
   const base = createEmptyDraft();
   return {
-    mode: ["unknown", "whole_week_with_exceptions", "explicit_slots_only"].includes(raw?.mode) ? raw.mode : base.mode,
     normalizedText: String(raw?.normalizedText || raw?.normalized_text || ""),
-    available: normalizeDayMap(raw?.available),
-    unavailable: normalizeDayMap(raw?.unavailable),
-    uncertain: normalizeDayMap(raw?.uncertain),
+    unavailableRules: normalizeRules(raw?.unavailableRules || raw?.unavailable_rules || raw?.unavailable),
+    uncertainRules: normalizeRules(raw?.uncertainRules || raw?.uncertain_rules || raw?.uncertain),
     lastIntent: ["overwrite", "patch", "confirm", "clarify"].includes(raw?.lastIntent || raw?.intent)
       ? (raw.lastIntent || raw.intent)
       : base.lastIntent,
     needsConfirmation: Boolean(raw?.needsConfirmation ?? raw?.needs_confirmation),
     clarificationQuestion: String(raw?.clarificationQuestion || raw?.clarification_question || "")
   };
+}
+
+function normalizeRules(input) {
+  if (Array.isArray(input)) {
+    return input
+      .map((rule) => normalizeRule(rule))
+      .filter(Boolean);
+  }
+
+  if (input && typeof input === "object") {
+    return legacyDayMapToRules(input);
+  }
+
+  return [];
+}
+
+function normalizeRule(rule) {
+  const days = Array.isArray(rule?.days)
+    ? Array.from(new Set(rule.days.map((day) => String(day)).filter((day) => DAY_KEYS.includes(day)))).sort()
+    : [];
+  const start = normalizeTime(rule?.start);
+  const end = normalizeTime(rule?.end);
+
+  if (!days.length || !start || !end || toMinutes(end) <= toMinutes(start)) {
+    return null;
+  }
+
+  return {
+    days,
+    start,
+    end,
+    reason: String(rule?.reason || "")
+  };
+}
+
+function legacyDayMapToRules(dayMap) {
+  const rules = [];
+  DAY_KEYS.forEach((day) => {
+    const hours = sanitizeHours(dayMap?.[day]);
+    if (!hours.length) {
+      return;
+    }
+
+    let start = hours[0];
+    let previous = hours[0];
+    for (let index = 1; index < hours.length; index += 1) {
+      const hour = hours[index];
+      if (hour === previous + 1) {
+        previous = hour;
+        continue;
+      }
+
+      rules.push({
+        days: [day],
+        start: formatHour(start),
+        end: formatHour(previous + 1),
+        reason: ""
+      });
+      start = hour;
+      previous = hour;
+    }
+
+    rules.push({
+      days: [day],
+      start: formatHour(start),
+      end: formatHour(previous + 1),
+      reason: ""
+    });
+  });
+  return rules;
+}
+
+function sanitizeHours(hours) {
+  return Array.from(new Set((hours || []).filter((hour) => Number.isInteger(hour) && hour >= 10 && hour <= 22))).sort((a, b) => a - b);
+}
+
+function normalizeTime(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return "";
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    return "";
+  }
+
+  const clampedMinutes = Math.max(10 * 60, Math.min(23 * 60, hour * 60 + minute));
+  const normalizedHour = Math.floor(clampedMinutes / 60);
+  const normalizedMinute = clampedMinutes % 60;
+  return `${String(normalizedHour).padStart(2, "0")}:${String(normalizedMinute).padStart(2, "0")}`;
+}
+
+function toMinutes(time) {
+  const match = String(time || "").match(/^(\d{2}):(\d{2})$/);
+  if (!match) {
+    return NaN;
+  }
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function formatHour(hour) {
+  return `${String(hour).padStart(2, "0")}:00`;
+}
+
+function expandRulesToSlots(rules) {
+  const slots = new Set();
+
+  rules.forEach((rule) => {
+    const startMinutes = toMinutes(rule.start);
+    const endMinutes = toMinutes(rule.end);
+    if (!Number.isFinite(startMinutes) || !Number.isFinite(endMinutes) || endMinutes <= startMinutes) {
+      return;
+    }
+
+    rule.days.forEach((day) => {
+      OPEN_HOURS.forEach((hour) => {
+        const slotStart = hour * 60;
+        const slotEnd = (hour + 1) * 60;
+        if (startMinutes < slotEnd && endMinutes > slotStart) {
+          slots.add(`${day}-${hour}`);
+        }
+      });
+    });
+  });
+
+  return sanitizeSlots(Array.from(slots));
+}
+
+function buildAllWeekSlots() {
+  const slots = [];
+  for (let day = 0; day <= 6; day += 1) {
+    OPEN_HOURS.forEach((hour) => {
+      slots.push(`${day}-${hour}`);
+    });
+  }
+  return slots;
+}
+
+function subtractSlots(base, excluded) {
+  const excludedSet = new Set(excluded);
+  return sanitizeSlots(base.filter((slot) => !excludedSet.has(slot)));
 }
 
 function sanitizeSlots(slots) {
@@ -289,43 +421,6 @@ function sanitizeSlots(slots) {
     const [rightDay, rightHour] = right.split("-").map(Number);
     return (leftDay - rightDay) || (leftHour - rightHour);
   });
-}
-
-function dayMapToSlots(dayMap) {
-  const slots = [];
-
-  DAY_KEYS.forEach((day) => {
-    sanitizeHours(dayMap?.[day]).forEach((hour) => {
-      slots.push(`${day}-${hour}`);
-    });
-  });
-
-  return sanitizeSlots(slots);
-}
-
-function computeAvailableSlots(draft) {
-  const available = new Set();
-  const unavailable = new Set(dayMapToSlots(draft.unavailable));
-  const uncertain = new Set(dayMapToSlots(draft.uncertain));
-
-  if (draft.mode === "whole_week_with_exceptions") {
-    for (let day = 0; day <= 6; day += 1) {
-      OPEN_HOURS.forEach((hour) => {
-        const slot = `${day}-${hour}`;
-        if (!unavailable.has(slot) && !uncertain.has(slot)) {
-          available.add(slot);
-        }
-      });
-    }
-  } else {
-    dayMapToSlots(draft.available).forEach((slot) => {
-      if (!unavailable.has(slot) && !uncertain.has(slot)) {
-        available.add(slot);
-      }
-    });
-  }
-
-  return sanitizeSlots(Array.from(available));
 }
 
 function buildSummaryFromSlots(slots) {
@@ -367,9 +462,5 @@ function buildSummaryFromSlots(slots) {
 }
 
 function formatRange(start, end) {
-  return `${padHour(start)}~${padHour(end + 1)}`;
-}
-
-function padHour(hour) {
-  return `${String(hour).padStart(2, "0")}:00`;
+  return `${formatHour(start)}~${formatHour(end + 1)}`;
 }
