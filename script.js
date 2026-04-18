@@ -373,10 +373,10 @@ async function handleUploadTabFile() {
     return;
   }
 
-  const file = tabsFileInput?.files?.[0];
-  if (!file) {
+  const files = Array.from(tabsFileInput?.files || []);
+  if (!files.length) {
     if (tabsUploadStatus) {
-      tabsUploadStatus.textContent = "先选择一个文件。";
+      tabsUploadStatus.textContent = "先选择至少一个文件。";
     }
     return;
   }
@@ -385,10 +385,12 @@ async function handleUploadTabFile() {
   formData.append("action", "uploadFile");
   formData.append("song", currentTabSong);
   formData.append("uploader", memberSelect.value);
-  formData.append("file", file);
+  files.forEach((file) => {
+    formData.append("files", file);
+  });
 
   if (tabsUploadStatus) {
-    tabsUploadStatus.textContent = "正在上传文件...";
+    tabsUploadStatus.textContent = `正在上传 ${files.length} 个文件...`;
   }
 
   try {
@@ -401,11 +403,12 @@ async function handleUploadTabFile() {
       throw new Error(await response.text() || "Upload failed");
     }
 
+    const data = await response.json();
     if (tabsFileInput) {
       tabsFileInput.value = "";
     }
     if (tabsUploadStatus) {
-      tabsUploadStatus.textContent = "文件已上传。";
+      tabsUploadStatus.textContent = `已上传 ${data.uploadedCount || files.length} 个文件；如果有重名文件，已经自动覆盖。`;
     }
     await renderTabs(currentTabSong);
   } catch (error) {

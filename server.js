@@ -28,7 +28,7 @@ app.use((req, res, next) => {
 app.all("/api/parse", (req, res) => parseHandler(req, res));
 app.all("/api/state", (req, res) => stateHandler(req, res));
 app.get("/api/tabs", (req, res) => tabsHandler(req, res));
-app.post("/api/tabs", upload.single("file"), (req, res) => tabsHandler(req, res));
+app.post("/api/tabs", upload.array("files", 50), (req, res) => tabsHandler(req, res));
 app.delete("/api/tabs", (req, res) => tabsHandler(req, res));
 app.all("/api/transcribe", (req, res) => transcribeHandler(req, res));
 

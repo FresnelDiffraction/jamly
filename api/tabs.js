@@ -48,30 +48,38 @@ module.exports = async function handler(req, res) {
       if (action === "uploadFile") {
         const songName = String(req.body?.song || "").trim();
         const uploader = String(req.body?.uploader || "").trim();
-        if (!songName || !req.file) {
-          res.status(400).send("Missing song or file");
+        const files = Array.isArray(req.files) ? req.files.filter(Boolean) : [];
+        if (!songName || !files.length) {
+          res.status(400).send("Missing song or files");
           return;
         }
 
         const songPath = resolveSongPath(songName);
         await fs.mkdir(songPath, { recursive: true });
-        const safeName = sanitizeFileName(req.file.originalname);
-        const targetPath = path.join(songPath, safeName);
-        await fs.writeFile(targetPath, req.file.buffer);
-
         const metadata = await readMeta();
         metadata.songs[songName] = metadata.songs[songName] || {
           createdBy: uploader || "未知成员",
           createdAt: new Date().toISOString(),
           files: {}
         };
-        metadata.songs[songName].files[safeName] = {
-          uploadedBy: uploader || "未知成员",
-          uploadedAt: new Date().toISOString()
-        };
+
+        for (const file of files) {
+          const safeName = sanitizeFileName(file.originalname);
+          const targetPath = path.join(songPath, safeName);
+          await fs.writeFile(targetPath, file.buffer);
+          metadata.songs[songName].files[safeName] = {
+            uploadedBy: uploader || "未知成员",
+            uploadedAt: new Date().toISOString()
+          };
+        }
+
         await writeMeta(metadata);
 
-        res.status(200).json({ song: songName, files: await listSongFiles(songName) });
+        res.status(200).json({
+          song: songName,
+          uploadedCount: files.length,
+          files: await listSongFiles(songName)
+        });
         return;
       }
 
