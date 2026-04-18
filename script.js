@@ -24,6 +24,13 @@ const todoList = document.getElementById("todo-list");
 const tabsList = document.getElementById("tabs-list");
 const tabsBackButton = document.getElementById("tabs-back-button");
 const tabsBreadcrumb = document.getElementById("tabs-breadcrumb");
+const tabsCreateSongButton = document.getElementById("tabs-create-song-button");
+const tabsCreateForm = document.getElementById("tabs-create-form");
+const tabsSongNameInput = document.getElementById("tabs-song-name");
+const tabsSongActions = document.getElementById("tabs-song-actions");
+const tabsFileInput = document.getElementById("tabs-file-input");
+const tabsUploadButton = document.getElementById("tabs-upload-button");
+const tabsUploadStatus = document.getElementById("tabs-upload-status");
 
 let speechRecognition = null;
 let isRecording = false;
@@ -46,6 +53,9 @@ async function bootstrap() {
   clearMemberButton.addEventListener("click", clearCurrentMemberState);
   todoForm.addEventListener("submit", handleTodoSubmit);
   tabsBackButton?.addEventListener("click", () => renderTabs(""));
+  tabsCreateSongButton?.addEventListener("click", toggleCreateSongForm);
+  tabsCreateForm?.addEventListener("submit", handleCreateSong);
+  tabsUploadButton?.addEventListener("click", handleUploadTabFile);
 
   await syncStateFromServer({ allowUploadLocal: true, silent: false });
 
@@ -226,6 +236,15 @@ async function renderTabs(song = currentTabSong) {
   }
 
   tabsBackButton.hidden = !song;
+  if (tabsSongActions) {
+    tabsSongActions.hidden = !song;
+  }
+  if (tabsCreateForm && song) {
+    tabsCreateForm.hidden = true;
+  }
+  if (tabsUploadStatus) {
+    tabsUploadStatus.textContent = "";
+  }
   tabsBreadcrumb.textContent = song ? `曲谱总表 / ${song}` : "曲谱总表";
   tabsList.innerHTML = `<div class="empty-copy">正在读取曲谱...</div>`;
 
@@ -256,7 +275,7 @@ function renderSongList(songs) {
   tabsList.innerHTML = songs.map((song) => `
     <button type="button" class="tabs-item tabs-song-button" data-song-name="${escapeHtml(song.name)}">
       <span class="tabs-item-title">${escapeHtml(song.name)}</span>
-      <span class="slot-meta">点击查看这首歌的所有文件</span>
+      <span class="slot-meta">${song.fileCount || 0} 个文件${song.createdBy ? ` · 由 ${escapeHtml(song.createdBy)} 创建` : ""}</span>
     </button>
   `).join("");
 
@@ -269,16 +288,156 @@ function renderSongList(songs) {
 
 function renderSongFiles(song, files) {
   if (!files.length) {
-    tabsList.innerHTML = `<div class="empty-copy">${escapeHtml(song)} 下面还没有文件。</div>`;
+    tabsList.innerHTML = `<div class="empty-copy">${escapeHtml(song)} 下面还没有文件。你可以先上传一个曲谱文件。</div>`;
     return;
   }
 
   tabsList.innerHTML = files.map((file) => `
-    <a class="tabs-item tabs-file-link" href="${encodeURI(file.href)}" target="_blank" rel="noreferrer">
-      <span class="tabs-item-title">${escapeHtml(file.name)}</span>
-      <span class="slot-meta">点击打开或下载</span>
-    </a>
+    <div class="tabs-item tabs-file-item">
+      <a class="tabs-file-link" href="${encodeURI(file.href)}" target="_blank" rel="noreferrer">
+        <span class="tabs-item-title">${escapeHtml(file.name)}</span>
+        <span class="slot-meta">${file.uploadedBy ? `上传者：${escapeHtml(file.uploadedBy)}` : "未记录上传者"}</span>
+      </a>
+      <button type="button" class="ghost-button tabs-delete-button" data-file-name="${escapeHtml(file.name)}">删除文件</button>
+    </div>
   `).join("");
+
+  tabsList.querySelectorAll("[data-file-name]").forEach((button) => {
+    button.addEventListener("click", () => {
+      deleteTabFile(song, button.dataset.fileName);
+    });
+  });
+}
+
+function toggleCreateSongForm() {
+  if (!tabsCreateForm) {
+    return;
+  }
+  tabsCreateForm.hidden = !tabsCreateForm.hidden;
+  if (!tabsCreateForm.hidden) {
+    tabsSongNameInput?.focus();
+  }
+}
+
+async function handleCreateSong(event) {
+  event.preventDefault();
+  const songName = tabsSongNameInput?.value.trim();
+  if (!songName) {
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = "先输入歌曲名，再创建。";
+    }
+    return;
+  }
+
+  if (tabsUploadStatus) {
+    tabsUploadStatus.textContent = "正在创建歌曲目录...";
+  }
+
+  try {
+    const response = await fetch("/api/tabs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "createSong",
+        songName,
+        uploader: memberSelect.value
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text() || "Create song failed");
+    }
+
+    if (tabsSongNameInput) {
+      tabsSongNameInput.value = "";
+    }
+    if (tabsCreateForm) {
+      tabsCreateForm.hidden = true;
+    }
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = "歌曲已创建。";
+    }
+    await renderTabs("");
+  } catch (error) {
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = `创建失败：${error.message || "请稍后再试"}`;
+    }
+  }
+}
+
+async function handleUploadTabFile() {
+  if (!currentTabSong) {
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = "先进入一首歌，再上传文件。";
+    }
+    return;
+  }
+
+  const file = tabsFileInput?.files?.[0];
+  if (!file) {
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = "先选择一个文件。";
+    }
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("action", "uploadFile");
+  formData.append("song", currentTabSong);
+  formData.append("uploader", memberSelect.value);
+  formData.append("file", file);
+
+  if (tabsUploadStatus) {
+    tabsUploadStatus.textContent = "正在上传文件...";
+  }
+
+  try {
+    const response = await fetch("/api/tabs", {
+      method: "POST",
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text() || "Upload failed");
+    }
+
+    if (tabsFileInput) {
+      tabsFileInput.value = "";
+    }
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = "文件已上传。";
+    }
+    await renderTabs(currentTabSong);
+  } catch (error) {
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = `上传失败：${error.message || "请稍后再试"}`;
+    }
+  }
+}
+
+async function deleteTabFile(song, fileName) {
+  if (tabsUploadStatus) {
+    tabsUploadStatus.textContent = "正在删除文件...";
+  }
+
+  try {
+    const response = await fetch(`/api/tabs?song=${encodeURIComponent(song)}&file=${encodeURIComponent(fileName)}`, {
+      method: "DELETE"
+    });
+
+    if (!response.ok) {
+      throw new Error(await response.text() || "Delete failed");
+    }
+
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = "文件已删除。";
+    }
+    await renderTabs(song);
+  } catch (error) {
+    if (tabsUploadStatus) {
+      tabsUploadStatus.textContent = `删除失败：${error.message || "请稍后再试"}`;
+    }
+  }
 }
 
 function renderAll() {

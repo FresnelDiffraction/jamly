@@ -406,9 +406,44 @@ input::placeholder {
   gap: 12px;
 }
 
+.tabs-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tabs-create-button,
+.tabs-delete-button {
+  min-height: 40px;
+  padding: 8px 14px;
+}
+
 .tabs-back-button {
   min-height: 40px;
   padding: 8px 14px;
+}
+
+.tabs-create-form,
+.tabs-song-actions {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.tabs-create-form {
+  grid-template-columns: minmax(0, 1fr) 110px;
+  align-items: center;
+}
+
+.tabs-song-actions {
+  grid-template-columns: auto minmax(0, 1fr) 120px;
+  align-items: center;
+}
+
+.tabs-upload-label {
+  color: var(--muted);
+  font-size: 14px;
 }
 
 .tabs-item {
@@ -423,6 +458,20 @@ input::placeholder {
 .tabs-file-link {
   color: var(--ink);
   text-decoration: none;
+}
+
+.tabs-file-item {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.tabs-file-link {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
 }
 
 .tabs-song-button {
@@ -511,6 +560,16 @@ input::placeholder {
 
   .todo-form-inline {
     grid-template-columns: 1fr;
+  }
+
+  .tabs-toolbar,
+  .tabs-toolbar-main,
+  .tabs-create-form,
+  .tabs-song-actions,
+  .tabs-file-item {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .composer-actions {

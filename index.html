@@ -91,9 +91,22 @@
           </div>
           <div class="tabs-panel">
             <div class="tabs-toolbar">
-              <button type="button" class="ghost-button tabs-back-button" id="tabs-back-button" hidden>返回歌单</button>
-              <div class="support-text" id="tabs-breadcrumb">曲谱总表</div>
+              <div class="tabs-toolbar-main">
+                <button type="button" class="ghost-button tabs-back-button" id="tabs-back-button" hidden>返回歌单</button>
+                <div class="support-text" id="tabs-breadcrumb">曲谱总表</div>
+              </div>
+              <button type="button" class="ghost-button tabs-create-button" id="tabs-create-song-button">新建歌曲</button>
             </div>
+            <form class="tabs-create-form" id="tabs-create-form" hidden>
+              <input id="tabs-song-name" type="text" placeholder="输入歌曲名，例如 Paranoid Android" aria-label="歌曲名">
+              <button type="submit" class="primary-button">创建</button>
+            </form>
+            <div class="tabs-song-actions" id="tabs-song-actions" hidden>
+              <label class="tabs-upload-label" for="tabs-file-input">添加文件</label>
+              <input id="tabs-file-input" type="file" aria-label="上传曲谱文件">
+              <button type="button" class="primary-button" id="tabs-upload-button">上传文件</button>
+            </div>
+            <div class="support-text" id="tabs-upload-status"></div>
             <div class="tabs-list" id="tabs-list"></div>
           </div>
         </div>
